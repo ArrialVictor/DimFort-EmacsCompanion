@@ -259,6 +259,29 @@ falls back to stopping and restarting the eglot connection."
                         dimfort-code-lens-enabled
                         "code lens")
 
+;;;###autoload
+(defun dimfort-status ()
+  "Print the current DimFort feature flags in the echo area.
+
+Users don't have to track toggle counts to know which features
+are on — invoke this to see the live state."
+  (interactive)
+  (cl-flet ((flag (v) (if v "on" "off")))
+    (message
+     (concat
+      "DimFort status\n"
+      (format "  executable        : %s\n" dimfort-executable)
+      (format "  inlay hints       : %s\n" (flag dimfort-inlay-hints-enabled))
+      (format "  completion        : %s\n" (flag dimfort-completion-enabled))
+      (format "  code actions      : %s\n" (flag dimfort-code-actions-enabled))
+      (format "  go-to-definition  : %s\n" (flag dimfort-goto-definition-enabled))
+      (format "  code lens         : %s\n" (flag dimfort-code-lens-enabled))
+      (format "  max workset size  : %d\n" dimfort-max-workset-size)
+      (format "  external modules  : %s"
+              (if dimfort-external-modules
+                  (mapconcat #'identity dimfort-external-modules ", ")
+                "(none)"))))))
+
 (provide 'dimfort)
 
 ;;; dimfort.el ends here

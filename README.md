@@ -64,6 +64,7 @@ All variables live under `M-x customize-group RET dimfort`:
 |----------------------------------|-------------------------------------------------|
 | `M-x dimfort-check-workspace`    | Run the workspace-wide unit check.              |
 | `M-x dimfort-restart`            | Restart the language server.                    |
+| `M-x dimfort-status`             | Print current feature toggles in the echo area. |
 | `M-x dimfort-toggle-inlay-hints` | Toggle inlay hints; restarts the server.        |
 | `M-x dimfort-toggle-completion`  | Toggle unit-name completion; restarts.          |
 | `M-x dimfort-toggle-code-actions`| Toggle code actions; restarts.                  |
