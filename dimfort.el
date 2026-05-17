@@ -125,7 +125,55 @@ the literal text at (LINE, CHARACTER) inside the buffer for URI."
 (defvar eglot-server-programs)
 (declare-function eglot-execute-command "eglot")
 (declare-function eglot-current-server "eglot")
-(declare-function eglot-reconnect "eglot")
+(declare-function eglot-shutdown "eglot")
+(declare-function eglot-ensure "eglot")
+(declare-function eglot--update-hints-1 "eglot")
+(defvar eglot-inlay-hints-mode)
+
+(defcustom dimfort-inlay-refresh-delay 1.2
+  "Seconds to wait after attach/restart before forcing an inlay re-request.
+
+Eglot (as of Emacs 30) doesn't handle ``workspace/inlayHint/refresh''
+notifications from the server — its inlay-hint requests are
+JIT-driven by scroll/edit events.  After we attach or restart, the
+server's initial workspace check may not finish before eglot's
+first inlay request, so the first response comes back empty and
+eglot caches it.  This timer forces a re-request once the check
+should be done."
+  :type 'number)
+
+(defun dimfort--force-inlay-refresh ()
+  "Force eglot to re-request inlay hints in every DimFort-managed buffer."
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (and (boundp 'eglot-inlay-hints-mode)
+                 eglot-inlay-hints-mode
+                 (fboundp 'eglot-current-server)
+                 (eglot-current-server)
+                 (fboundp 'eglot--update-hints-1))
+        (ignore-errors
+          (eglot--update-hints-1 (point-min) (point-max)))))))
+
+(defun dimfort--clear-inlay-overlays ()
+  "Remove every eglot inlay-hint overlay in every managed buffer.
+
+Used for the immediate-feedback half of toggling inlay hints off:
+without this, the overlays linger until eglot processes the next
+inlayHint response (which may be delayed or skipped after the
+server restart)."
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (and (boundp 'eglot-inlay-hints-mode) eglot-inlay-hints-mode)
+        (save-restriction
+          (widen)
+          (dolist (o (overlays-in (point-min) (point-max)))
+            (when (overlay-get o 'eglot--inlay-hint)
+              (delete-overlay o))))))))
+
+(defun dimfort--schedule-inlay-refresh ()
+  "Schedule a delayed `dimfort--force-inlay-refresh' call."
+  (run-at-time dimfort-inlay-refresh-delay nil
+               #'dimfort--force-inlay-refresh))
 
 (defun dimfort--eglot-setup ()
   "Register DimFort with eglot."
@@ -145,7 +193,14 @@ the literal text at (LINE, CHARACTER) inside the buffer for URI."
     ;; Handle the `dimfort.insertSnippet' workspace command. eglot
     ;; calls `eglot-execute-command' on every server-initiated
     ;; workspace/executeCommand; intercept ours via :around advice.
-    (advice-add 'eglot-execute-command :around #'dimfort--eglot-execute-advice)))
+    (advice-add 'eglot-execute-command :around #'dimfort--eglot-execute-advice)
+    ;; eglot 1.17 (Emacs 30) ignores `workspace/inlayHint/refresh',
+    ;; so after every fresh attach we schedule our own re-request
+    ;; once the server's initial workspace check has had time to
+    ;; finish.  Without this, the first inlay request races and
+    ;; loses, and the buffer renders no hints until the user edits.
+    (add-hook 'eglot-managed-mode-hook
+              #'dimfort--schedule-inlay-refresh)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept the DimFort-specific workspace command before eglot's generic path."
@@ -203,16 +258,31 @@ de-duplicate by server-id / mode."
   "Restart the active DimFort language server.
 
 Tries lsp-mode first (it has a native workspace-restart), then
-falls back to stopping and restarting the eglot connection."
+falls back to a full eglot shutdown + reattach.
+
+We deliberately avoid `eglot-reconnect': it restarts from the
+*saved* initargs of the original connect, so our contact
+lambda is not re-invoked and a fresh `dimfort-*-enabled' value
+never reaches the new server.  Shutdown + `eglot-ensure'
+forces eglot to walk `eglot-server-programs' again, which
+re-evaluates our lambda with the live customizables.
+
+Also schedules a delayed inlay-hint re-request, since eglot
+ignores `workspace/inlayHint/refresh' and would otherwise
+leave the buffer with the pre-restart hint cache."
   (interactive)
   (cond
    ((and (featurep 'lsp-mode) (fboundp 'lsp-workspace-restart)
          (fboundp 'lsp-find-workspace))
     (call-interactively 'lsp-workspace-restart))
-   ((and (featurep 'eglot) (fboundp 'eglot-reconnect))
+   ((featurep 'eglot)
     (let ((server (and (fboundp 'eglot-current-server) (eglot-current-server))))
       (if server
-          (eglot-reconnect server)
+          (progn
+            (ignore-errors
+              (eglot-shutdown server nil nil 'preserve-buffers))
+            (eglot-ensure)
+            (dimfort--schedule-inlay-refresh))
         (message "DimFort: no active eglot server in this buffer."))))
    (t (message "DimFort: neither eglot nor lsp-mode is active."))))
 
@@ -243,9 +313,22 @@ falls back to stopping and restarting the eglot connection."
        (message "DimFort: %s %s" ,label (if ,var "on" "off"))
        (dimfort-restart))))
 
-(dimfort--define-toggle dimfort-toggle-inlay-hints
-                        dimfort-inlay-hints-enabled
-                        "inlay hints")
+;;;###autoload
+(defun dimfort-toggle-inlay-hints ()
+  "Toggle inlay hints and restart the DimFort language server.
+
+Unlike the other toggles, this one clears any leftover hint
+overlays immediately when transitioning to off — the server
+restart + eglot re-request flow doesn't reliably wipe them
+otherwise."
+  (interactive)
+  (setq dimfort-inlay-hints-enabled (not dimfort-inlay-hints-enabled))
+  (message "DimFort: inlay hints %s"
+           (if dimfort-inlay-hints-enabled "on" "off"))
+  (dimfort-restart)
+  (unless dimfort-inlay-hints-enabled
+    (dimfort--clear-inlay-overlays)))
+
 (dimfort--define-toggle dimfort-toggle-completion
                         dimfort-completion-enabled
                         "unit completion")
