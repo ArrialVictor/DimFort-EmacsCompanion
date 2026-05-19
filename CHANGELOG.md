@@ -10,6 +10,22 @@ defaults, packaging).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-05-19
+
+First public release. The `dimfort.el` header has carried
+`Version: 0.1.0` since initial commit; this release tags it.
+
+Install via straight.el / use-package or clone-and-`require`.
+Requires Emacs ≥ 29.1 and DimFort itself on PATH
+(`pipx install 'dimfort[lsp]'`). Works with both eglot (built-in
+since Emacs 29) and lsp-mode (MELPA).
+
+```elisp
+(use-package dimfort
+  :straight (:host github :repo "ArrialVictor/DimFort-EmacsCompanion")
+  :hook (f90-mode . dimfort-ensure))
+```
+
 ### 2026-05-18
 
 - **Workarounds for eglot 1.17 quirks**:
