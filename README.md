@@ -1,5 +1,7 @@
 # DimFort — Emacs companion
 
+![preview](social_preview.png)
+
 Emacs companion for [DimFort](https://github.com/ArrialVictor/DimFort) —
 the dimensional-homogeneity checker for Fortran. Thin LSP client +
 commands; the heavy lifting is done by the `dimfort lsp` server.
