@@ -1,0 +1,59 @@
+name: lint
+
+# Tag-gated for now (pre-public; private repos have limited CI
+# minutes). Once the repo is public, add a `pull_request:` trigger
+# and `push: branches: [main]`.
+#
+# A thin LSP client has very little runtime behaviour to test — so
+# this is byte-compile + package-lint only. Catches:
+#   - Syntax errors and macro misuse (byte-compile)
+#   - Convention violations that block MELPA acceptance
+#     (package-lint). dimfort.el already has a MELPA-compatible
+#     header; this guards against regression.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Stay close to the floor declared by Package-Requires.
+        # Adding a newer version is cheap if regressions surface.
+        emacs_version: ["29.1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Emacs
+        uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs_version }}
+
+      - name: Install package-lint
+        run: |
+          emacs --batch --eval "(progn \
+            (require 'package) \
+            (add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t) \
+            (package-initialize) \
+            (package-refresh-contents) \
+            (package-install 'package-lint))"
+
+      - name: Byte-compile
+        run: |
+          emacs --batch \
+            --eval "(setq byte-compile-error-on-warn t)" \
+            --funcall batch-byte-compile dimfort.el
+
+      - name: package-lint
+        run: |
+          emacs --batch \
+            --eval "(progn \
+              (require 'package) \
+              (add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t) \
+              (package-initialize))" \
+            -l package-lint \
+            --funcall package-lint-batch-and-exit dimfort.el
