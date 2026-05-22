@@ -10,6 +10,24 @@ defaults, packaging).
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-22
+
+### Added
+
+- **Side panel** — a cursor-following side window (`dimfort-panel-toggle`)
+  fed by the `dimfort/panelInfo` LSP request, with two stacked sections:
+  - **Expression** — the unit-algebra tree for the expression under the
+    cursor, units and 🟢/🟡/🔴 markers aligned in columns.
+  - **Scope** — declarations of every enclosing scope (subroutine /
+    function / module / program), stacked outermost-first and indented
+    by nesting, each variable marked 🟢 (annotated) / 🟡 (unannotated) /
+    🔴 (annotation present but unparseable).
+  - Options: `dimfort-panel-enabled` (default `nil` — open on demand),
+    `dimfort-panel-side`, `dimfort-panel-width`, `dimfort-panel-height`,
+    `dimfort-panel-debounce`, `dimfort-panel-layout`.
+  - Commands: `dimfort-panel-toggle` / `-open` / `-close`. Works under
+    both eglot (`jsonrpc-async-request`) and lsp-mode (`lsp-request-async`).
+
 ## [0.1.1] — 2026-05-22
 
 Feature-parity catch-up with the VSCode and Neovim companions. All

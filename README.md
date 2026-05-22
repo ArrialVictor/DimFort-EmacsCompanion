@@ -65,6 +65,11 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
 | `dimfort-external-modules`        | `nil`       | Modules treated as out-of-workset (silences U007). |
 | `dimfort-fortran-modes`           | `(f90-mode fortran-mode)` | Modes DimFort registers for. |
+| `dimfort-panel-enabled`           | `nil`       | Open the side panel automatically on attach (off — open on demand). |
+| `dimfort-panel-side`              | `right`     | Panel dock side (`right` / `left` / `bottom`). |
+| `dimfort-panel-width`             | `0.35`      | Panel width fraction (left/right docking). |
+| `dimfort-panel-debounce`          | `0.2`       | Idle seconds before the panel cursor-follow refresh. |
+| `dimfort-panel-layout`            | `both`      | Panel sections (`both` / `expression` / `routine`). |
 
 ## Commands
 
@@ -83,6 +88,8 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-cycle-hover-subroutine-calls` | Cycle subroutine-call hover detail. |
 | `M-x dimfort-cycle-hover-expressions` | Cycle expression hover detail.             |
 | `M-x dimfort-toggle-cache`       | Toggle the content-hash cache (off ↔ read-write); restarts. |
+| `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel (Expression + Scope). |
+| `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
 
 ## What you get
 

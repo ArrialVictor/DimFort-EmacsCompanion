@@ -4,7 +4,7 @@
 
 ;; Author: Victor Arrial
 ;; URL: https://github.com/ArrialVictor/DimFort-EmacsCompanion
-;; Version: 0.1.1
+;; Version: 0.1.2
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages, fortran, lsp, tools
 ;; SPDX-License-Identifier: MIT
@@ -316,7 +316,10 @@ server restart)."
     ;; finish.  Without this, the first inlay request races and
     ;; loses, and the buffer renders no hints until the user edits.
     (add-hook 'eglot-managed-mode-hook
-              #'dimfort--schedule-inlay-refresh)))
+              #'dimfort--schedule-inlay-refresh)
+    ;; Open the side panel on attach when the user opted in.
+    (add-hook 'eglot-managed-mode-hook
+              #'dimfort--panel-maybe-autoopen)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept the DimFort-specific workspace commands before eglot's generic path."
@@ -344,6 +347,8 @@ server restart)."
     ;; Make sure f90/fortran modes are mapped to a known language id.
     (dolist (mode dimfort-fortran-modes)
       (add-to-list 'lsp-language-id-configuration `(,mode . "fortran")))
+    ;; Open the side panel on attach when the user opted in.
+    (add-hook 'lsp-managed-mode-hook #'dimfort--panel-maybe-autoopen)
     (lsp-register-client
      (make-lsp-client
       :new-connection (lsp-stdio-connection #'dimfort--command)
@@ -530,6 +535,324 @@ are on — invoke this to see the live state."
               (if dimfort-external-modules
                   (mapconcat #'identity dimfort-external-modules ", ")
                 "(none)"))))))
+
+;;; Side panel
+
+;; A cursor-following side window with two stacked sections:
+;;   1. Expression — the unit-algebra tree under the cursor.
+;;   2. Scope — declarations of every enclosing scope, stacked
+;;      outermost-first, each variable marked 🟢 / 🟡 / 🔴.
+;; Driven by the custom `dimfort/panelInfo' LSP request (see
+;; DimFort/docs/design/panel-info.md). Closed by default; open it with
+;; `dimfort-panel-toggle'.
+
+(declare-function jsonrpc-async-request "jsonrpc")
+(declare-function lsp-request-async "lsp-mode")
+(declare-function lsp-workspaces "lsp-mode")
+
+(defcustom dimfort-panel-enabled nil
+  "Whether to open the side panel automatically when the server attaches.
+
+Closed by default — open it on demand with `dimfort-panel-toggle'."
+  :type 'boolean)
+
+(defcustom dimfort-panel-side 'right
+  "Which side of the frame the panel window docks to."
+  :type '(choice (const right) (const left) (const bottom)))
+
+(defcustom dimfort-panel-width 0.35
+  "Panel window width as a fraction of the frame (for left/right docking)."
+  :type 'number)
+
+(defcustom dimfort-panel-height 0.3
+  "Panel window height as a fraction of the frame (for bottom docking)."
+  :type 'number)
+
+(defcustom dimfort-panel-debounce 0.2
+  "Idle seconds before the panel refreshes after the cursor moves."
+  :type 'number)
+
+(defcustom dimfort-panel-layout 'both
+  "Which panel sections to show."
+  :type '(choice (const both) (const expression) (const routine)))
+
+(defconst dimfort--panel-buffer "*dimfort-panel*")
+(defconst dimfort--panel-divider (make-string 60 ?─))
+(defconst dimfort--panel-markers '(("ok" . "🟢") ("warn" . "🟡") ("error" . "🔴")))
+(defvar dimfort--panel-timer nil)
+(defvar dimfort--panel-last-payload nil)
+(defvar dimfort--panel-source-buffer nil)
+(defvar dimfort--panel-req-counter 0)
+
+;; -- field / sequence access (payload is a plist under eglot, a
+;; -- hash-table under lsp-mode; arrays are vectors vs lists). --
+
+(defun dimfort--seq (v)
+  "Coerce V (a JSON array as a vector or list) to a list."
+  (cond ((vectorp v) (append v nil)) ((listp v) v) (t nil)))
+
+(defun dimfort--titlecase (s)
+  "Capitalise the first letter of S."
+  (if (or (null s) (string-empty-p s)) (or s "")
+    (concat (upcase (substring s 0 1)) (substring s 1))))
+
+(defun dimfort--pad (s w)
+  "Left-justify S to display width W with trailing spaces."
+  (concat s (make-string (max 0 (- w (string-width s))) ?\s)))
+
+;; -- rendering (mirrors the Neovim panel so the two read identically) --
+
+(defun dimfort--panel-collect-expr (node prefix is-last is-root)
+  "Return an ordered list of entry plists for expression NODE and descendants.
+PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
+  (when node
+    (let* ((connector (cond (is-root "") (is-last "└── ") (t "├── ")))
+           (next-prefix (cond (is-root prefix)
+                              (is-last (concat prefix "    "))
+                              (t (concat prefix "│   "))))
+           (rule-id (dimfort--field node "ruleId"))
+           (marker (dimfort--field node "marker"))
+           (entry (list :tree (concat prefix connector
+                                      (or (dimfort--field node "label") "?"))
+                        :unit (dimfort--field node "unit")
+                        :mark (or (cdr (assoc marker dimfort--panel-markers)) " ")
+                        :rule (if rule-id (format " (%s)" rule-id) "")))
+           (children (dimfort--seq (dimfort--field node "children")))
+           (n (length children))
+           (result (list entry)))
+      (cl-loop for c in children for i from 1 do
+               (setq result (append result
+                                    (dimfort--panel-collect-expr
+                                     c next-prefix (= i n) nil))))
+      result)))
+
+(defun dimfort--panel-render-expr (node)
+  "Return a list of aligned rows for expression NODE."
+  (let ((entries (dimfort--panel-collect-expr node "" t t))
+        (tree-w 0) (unit-w 0) (rows '()))
+    (dolist (e entries)
+      (setq tree-w (max tree-w (string-width (plist-get e :tree))))
+      (when (plist-get e :unit)
+        (setq unit-w (max unit-w (string-width (plist-get e :unit))))))
+    (dolist (e entries)
+      (let* ((tree (plist-get e :tree))
+             (tree-pad (make-string (- tree-w (string-width tree)) ?\s))
+             (unit (plist-get e :unit))
+             (mid (cond
+                   (unit (concat " : " unit
+                                 (make-string (- unit-w (string-width unit)) ?\s)))
+                   ((> unit-w 0) (make-string (+ 3 unit-w) ?\s))
+                   (t ""))))
+        (setq rows (append rows
+                           (list (concat tree tree-pad mid "  "
+                                         (plist-get e :mark) (plist-get e :rule)))))))
+    rows))
+
+(defun dimfort--panel-render-scope (scope vars depth)
+  "Return rows for SCOPE and its VARS, indented by nesting DEPTH."
+  (let* ((pad (make-string (* 2 (or depth 0)) ?\s))
+         (rows '())
+         (vs (dimfort--seq vars)))
+    (setq rows
+          (list (if scope
+                    (concat pad (format "%s: %s"
+                                        (dimfort--titlecase (dimfort--field scope "kind"))
+                                        (or (dimfort--field scope "name") "")))
+                  (concat pad "Scope: (file level)"))
+                ""))
+    (if (null vs)
+        (append rows (list (concat pad "  (no declarations)")))
+      (let ((name-w 4) (unit-w 4))
+        (dolist (v vs)
+          (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
+          (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "(none)")))))
+        (setq rows (append rows
+                           (list (concat pad "  " (dimfort--pad "line" 4) "  "
+                                         (dimfort--pad "name" name-w) "  "
+                                         (dimfort--pad "unit" unit-w)))))
+        (dolist (v vs)
+          (let* ((unit (or (dimfort--field v "unit") "(none)"))
+                 (kind (dimfort--field v "kind"))
+                 (tail (cond ((equal kind "unannotated") " 🟡")
+                             ((equal kind "error") " 🔴")
+                             (t " 🟢"))))
+            (setq rows (append rows
+                               (list (concat pad "  "
+                                             (dimfort--pad
+                                              (number-to-string (or (dimfort--field v "line") 0)) 4)
+                                             "  " (dimfort--pad (or (dimfort--field v "name") "") name-w)
+                                             "  " (dimfort--pad unit unit-w) tail))))))
+        rows))))
+
+(defun dimfort--panel-render (payload)
+  "Return the full list of panel rows for PAYLOAD."
+  (let ((rows '()))
+    (cl-flet ((add (&rest xs) (setq rows (append rows xs))))
+      (when (memq dimfort-panel-layout '(both expression))
+        (add "Expression" "")
+        (let ((expr (and payload (dimfort--field payload "expression"))))
+          (if expr
+              (setq rows (append rows (dimfort--panel-render-expr expr)))
+            (add "  (no expression at cursor)")))
+        (add ""))
+      (when (eq dimfort-panel-layout 'both)
+        (add dimfort--panel-divider ""))
+      (when (memq dimfort-panel-layout '(both routine))
+        (let ((scopes (dimfort--seq (and payload (dimfort--field payload "scopes")))))
+          (cond
+           ((and payload scopes)
+            (cl-loop for sc in scopes for i from 0 do
+                     (when (> i 0) (add ""))
+                     (setq rows (append rows
+                                        (dimfort--panel-render-scope
+                                         sc (dimfort--field sc "vars") i)))))
+           (payload
+            (setq rows (append rows
+                               (dimfort--panel-render-scope
+                                (or (dimfort--field payload "scope")
+                                    (dimfort--field payload "routine"))
+                                (or (dimfort--field payload "scopeVars")
+                                    (dimfort--field payload "routineVars"))
+                                0))))
+           (t (add "Scope: (none)"))))))
+    rows))
+
+(defun dimfort--panel-paint (rows stale)
+  "Write ROWS into the panel buffer; dim them when STALE."
+  (let ((buf (get-buffer dimfort--panel-buffer)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (mapconcat #'identity rows "\n"))
+          (when stale
+            (add-text-properties (point-min) (point-max) '(face shadow))))))))
+
+;; -- window lifecycle + LSP request --
+
+(define-derived-mode dimfort-panel-mode special-mode "DimFort-Panel"
+  "Major mode for the DimFort side panel."
+  (setq truncate-lines t)
+  (setq-local cursor-type nil))
+
+(defun dimfort--panel-get-buffer ()
+  "Return the panel buffer, creating it in `dimfort-panel-mode' if needed."
+  (or (get-buffer dimfort--panel-buffer)
+      (with-current-buffer (get-buffer-create dimfort--panel-buffer)
+        (dimfort-panel-mode)
+        (current-buffer))))
+
+(defun dimfort--panel-window ()
+  "Return the live window showing the panel, or nil."
+  (let ((buf (get-buffer dimfort--panel-buffer)))
+    (and buf (get-buffer-window buf t))))
+
+(defun dimfort--panel-display-action ()
+  "Return the `display-buffer' action placing the panel on its side."
+  (if (eq dimfort-panel-side 'bottom)
+      `((display-buffer-in-side-window) (side . bottom)
+        (window-height . ,dimfort-panel-height))
+    `((display-buffer-in-side-window) (side . ,dimfort-panel-side)
+      (window-width . ,dimfort-panel-width))))
+
+(defun dimfort--uri-of (buf)
+  "Return the file:// URI for BUF, preferring the active client's helper."
+  (cond
+   ((and (featurep 'eglot) (fboundp 'eglot-path-to-uri) (buffer-file-name buf))
+    (eglot-path-to-uri (buffer-file-name buf)))
+   ((and (featurep 'eglot) (fboundp 'eglot--path-to-uri) (buffer-file-name buf))
+    (eglot--path-to-uri (buffer-file-name buf)))
+   ((and (featurep 'lsp-mode) (fboundp 'lsp--buffer-uri))
+    (with-current-buffer buf (lsp--buffer-uri)))
+   (t (concat "file://" (or (buffer-file-name buf) "")))))
+
+(defun dimfort--panel-position-params (buf)
+  "Build the `dimfort/panelInfo' params for the cursor position in BUF."
+  (with-current-buffer buf
+    (list :textDocument (list :uri (dimfort--uri-of buf))
+          :position (list :line (1- (line-number-at-pos (point) t))
+                          :character (- (point) (line-beginning-position))))))
+
+(defun dimfort--panel-request (buf params callback)
+  "Send `dimfort/panelInfo' with PARAMS for BUF, calling CALLBACK on the result."
+  (with-current-buffer buf
+    (cond
+     ((and (featurep 'eglot) (fboundp 'eglot-current-server)
+           (fboundp 'jsonrpc-async-request) (eglot-current-server))
+      (jsonrpc-async-request
+       (eglot-current-server) :dimfort/panelInfo params
+       :success-fn callback
+       :error-fn (lambda (_e) (dimfort--panel-paint '("(DimFort panel error)") nil))
+       :timeout 2))
+     ((and (featurep 'lsp-mode) (fboundp 'lsp-request-async)
+           (fboundp 'lsp-workspaces) (lsp-workspaces))
+      (lsp-request-async "dimfort/panelInfo" params callback
+                         :error-handler #'ignore))
+     (t (dimfort--panel-paint '("(DimFort LSP not attached)") nil)))))
+
+(defun dimfort--panel-refresh ()
+  "Re-request panel info for the current source buffer and repaint."
+  (setq dimfort--panel-timer nil)
+  (when (dimfort--panel-window)
+    (let ((buf dimfort--panel-source-buffer))
+      (if (and buf (buffer-live-p buf))
+          (let ((params (dimfort--panel-position-params buf))
+                (req (cl-incf dimfort--panel-req-counter)))
+            (dimfort--panel-paint (dimfort--panel-render dimfort--panel-last-payload) t)
+            (dimfort--panel-request
+             buf params
+             (lambda (result)
+               (when (= req dimfort--panel-req-counter)
+                 (setq dimfort--panel-last-payload result)
+                 (dimfort--panel-paint (dimfort--panel-render result) nil)))))
+        (dimfort--panel-paint '("(no Fortran buffer)") nil)))))
+
+(defun dimfort--panel-maybe-schedule ()
+  "On `post-command-hook': debounce a refresh when in a managed Fortran buffer."
+  (when (and (dimfort--panel-window)
+             (memq major-mode dimfort-fortran-modes)
+             (buffer-file-name))
+    (setq dimfort--panel-source-buffer (current-buffer))
+    (when (timerp dimfort--panel-timer) (cancel-timer dimfort--panel-timer))
+    (setq dimfort--panel-timer
+          (run-with-timer dimfort-panel-debounce nil #'dimfort--panel-refresh))))
+
+;;;###autoload
+(defun dimfort-panel-open ()
+  "Open the DimFort side panel and start following the cursor."
+  (interactive)
+  (dimfort--panel-get-buffer)
+  (display-buffer dimfort--panel-buffer (dimfort--panel-display-action))
+  (add-hook 'post-command-hook #'dimfort--panel-maybe-schedule)
+  (when (memq major-mode dimfort-fortran-modes)
+    (setq dimfort--panel-source-buffer (current-buffer)))
+  (dimfort--panel-refresh))
+
+;;;###autoload
+(defun dimfort-panel-close ()
+  "Close the DimFort side panel and stop following the cursor."
+  (interactive)
+  (remove-hook 'post-command-hook #'dimfort--panel-maybe-schedule)
+  (when (timerp dimfort--panel-timer)
+    (cancel-timer dimfort--panel-timer)
+    (setq dimfort--panel-timer nil))
+  (let ((win (dimfort--panel-window)))
+    (when win (delete-window win))))
+
+;;;###autoload
+(defun dimfort-panel-toggle ()
+  "Toggle the DimFort side panel."
+  (interactive)
+  (if (dimfort--panel-window)
+      (dimfort-panel-close)
+    (dimfort-panel-open)))
+
+(defun dimfort--panel-maybe-autoopen ()
+  "Open the panel on attach when `dimfort-panel-enabled' is non-nil."
+  (when (and dimfort-panel-enabled
+             (memq major-mode dimfort-fortran-modes)
+             (not (dimfort--panel-window)))
+    (dimfort-panel-open)))
 
 (provide 'dimfort)
 
