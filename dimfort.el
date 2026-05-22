@@ -61,10 +61,6 @@ hints are redundant noise beside it.  Toggle on with
   "Whether the LSP server should answer textDocument/definition."
   :type 'boolean)
 
-(defcustom dimfort-code-lens-enabled nil
-  "Whether the LSP server should advertise code lens."
-  :type 'boolean)
-
 (defcustom dimfort-trace-hover-enabled t
   "Whether hovers default to the full unit-algebra trace (Detailed).
 
@@ -124,7 +120,6 @@ three clients present an identical surface to the server."
            (completionEnabled . ,(if dimfort-completion-enabled t :json-false))
            (codeActionsEnabled . ,(if dimfort-code-actions-enabled t :json-false))
            (gotoDefinitionEnabled . ,(if dimfort-goto-definition-enabled t :json-false))
-           (codeLensEnabled . ,(if dimfort-code-lens-enabled t :json-false))
            (traceHoverEnabled . ,(if dimfort-trace-hover-enabled t :json-false))
            (hoverFunctionCalls . ,dimfort-hover-function-calls)
            (hoverSubroutineCalls . ,dimfort-hover-subroutine-calls)
@@ -152,24 +147,26 @@ the literal text at (LINE, CHARACTER) inside the buffer for URI."
                  uri))
          (buf (find-file-noselect file)))
     (with-current-buffer buf
-      (save-excursion
-        (goto-char (point-min))
-        (forward-line line)
-        (move-to-column character)
-        (let ((plain snippet)
-              (cursor-mark nil))
-          ;; Mark $0 / ${0} with a unique sentinel before stripping
-          ;; the other placeholders, so we can move point there.
-          (setq plain (replace-regexp-in-string "\\${0}\\|\\$0" "\0" plain))
-          (setq plain (replace-regexp-in-string "\\${[0-9]+:\\([^}]*\\)}" "\\1" plain))
-          (setq plain (replace-regexp-in-string "\\${[0-9]+}" "" plain))
-          (when (string-match "\0" plain)
-            (setq cursor-mark (match-beginning 0))
-            (setq plain (replace-regexp-in-string "\0" "" plain)))
-          (let ((insert-start (point)))
-            (insert plain)
-            (when cursor-mark
-              (goto-char (+ insert-start cursor-mark)))))))
+      ;; No `save-excursion' here: the whole point of the snippet's `$0`
+      ;; is to leave point between the braces. Wrapping the move in
+      ;; `save-excursion' would restore the prior point and undo it.
+      (goto-char (point-min))
+      (forward-line line)
+      (move-to-column character)
+      (let ((plain snippet)
+            (cursor-mark nil))
+        ;; Mark $0 / ${0} with a unique sentinel before stripping
+        ;; the other placeholders, so we can move point there.
+        (setq plain (replace-regexp-in-string "\\${0}\\|\\$0" "\0" plain))
+        (setq plain (replace-regexp-in-string "\\${[0-9]+:\\([^}]*\\)}" "\\1" plain))
+        (setq plain (replace-regexp-in-string "\\${[0-9]+}" "" plain))
+        (when (string-match "\0" plain)
+          (setq cursor-mark (match-beginning 0))
+          (setq plain (replace-regexp-in-string "\0" "" plain)))
+        (let ((insert-start (point)))
+          (insert plain)
+          (when cursor-mark
+            (goto-char (+ insert-start cursor-mark))))))
     (switch-to-buffer buf)))
 
 (defun dimfort--uri-to-file (uri)
@@ -240,6 +237,7 @@ Position objects (plist under eglot, hash-table under lsp-mode)."
 
 (defvar eglot-server-programs)
 (declare-function eglot-execute-command "eglot")
+(declare-function eglot-execute "eglot")
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-shutdown "eglot")
 (declare-function eglot-ensure "eglot")
@@ -306,10 +304,15 @@ server restart)."
                (append (dimfort--command)
                        (list :initializationOptions
                              (dimfort--init-options)))))))
-    ;; Handle the `dimfort.insertSnippet' workspace command. eglot
-    ;; calls `eglot-execute-command' on every server-initiated
-    ;; workspace/executeCommand; intercept ours via :around advice.
-    (advice-add 'eglot-execute-command :around #'dimfort--eglot-execute-advice)
+    ;; Intercept the DimFort client-side commands (`dimfort.insertSnippet',
+    ;; `dimfort.extractToParameter') before eglot forwards them to the
+    ;; server as `workspace/executeCommand' (the server doesn't define
+    ;; them — they edit the client buffer). Emacs 30's code-action path
+    ;; dispatches through `eglot-execute (server action)'; Emacs 29 used
+    ;; the now-obsolete `eglot-execute-command (server command args)'.
+    (if (fboundp 'eglot-execute)
+        (advice-add 'eglot-execute :around #'dimfort--eglot-execute-action-advice)
+      (advice-add 'eglot-execute-command :around #'dimfort--eglot-execute-advice))
     ;; eglot 1.17 (Emacs 30) ignores `workspace/inlayHint/refresh',
     ;; so after every fresh attach we schedule our own re-request
     ;; once the server's initial workspace check has had time to
@@ -322,13 +325,40 @@ server restart)."
               #'dimfort--panel-maybe-autoopen)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
-  "Intercept the DimFort-specific workspace commands before eglot's generic path."
+  "Intercept DimFort commands on Emacs 29's `eglot-execute-command' path."
   (cond
    ((equal command "dimfort.insertSnippet")
     (apply #'dimfort--insert-snippet (append arguments nil)))
    ((equal command "dimfort.extractToParameter")
     (apply #'dimfort--extract-to-parameter (append arguments nil)))
    (t (apply orig server command arguments rest))))
+
+(defun dimfort--action-command (action)
+  "Return (COMMAND-STRING . ARGS) carried by ACTION, or nil.
+
+ACTION is an LSP `Command' / `ExecuteCommandParams' (whose `:command'
+is a string) or a `CodeAction' (whose `:command' is a nested `Command'
+plist). Recurses one level to reach the string command name."
+  (let ((cmd (plist-get action :command)))
+    (cond
+     ((stringp cmd) (cons cmd (plist-get action :arguments)))
+     ((and cmd (listp cmd)) (dimfort--action-command cmd))
+     (t nil))))
+
+(defun dimfort--eglot-execute-action-advice (orig server action &rest rest)
+  "Intercept DimFort commands on Emacs 30+'s `eglot-execute' path.
+
+Handle our client-side commands locally; defer everything else (and
+any action that has no command of ours) to eglot's default handling."
+  (let* ((cv (dimfort--action-command action))
+         (command (car cv))
+         (arguments (cdr cv)))
+    (cond
+     ((equal command "dimfort.insertSnippet")
+      (apply #'dimfort--insert-snippet (append arguments nil)))
+     ((equal command "dimfort.extractToParameter")
+      (apply #'dimfort--extract-to-parameter (append arguments nil)))
+     (t (apply orig server action rest)))))
 
 
 ;;; lsp-mode integration
@@ -467,9 +497,6 @@ otherwise."
 (dimfort--define-toggle dimfort-toggle-goto-definition
                         dimfort-goto-definition-enabled
                         "go-to-definition")
-(dimfort--define-toggle dimfort-toggle-code-lens
-                        dimfort-code-lens-enabled
-                        "code lens")
 (dimfort--define-toggle dimfort-toggle-trace
                         dimfort-trace-hover-enabled
                         "full unit trace")
@@ -522,7 +549,6 @@ are on — invoke this to see the live state."
       (format "  completion        : %s\n" (flag dimfort-completion-enabled))
       (format "  code actions      : %s\n" (flag dimfort-code-actions-enabled))
       (format "  go-to-definition  : %s\n" (flag dimfort-goto-definition-enabled))
-      (format "  code lens         : %s\n" (flag dimfort-code-lens-enabled))
       (format "  full unit trace   : %s\n" (flag dimfort-trace-hover-enabled))
       (format "  hover (functions) : %s\n" dimfort-hover-function-calls)
       (format "  hover (subs)      : %s\n" dimfort-hover-subroutine-calls)
@@ -547,13 +573,15 @@ are on — invoke this to see the live state."
 ;; `dimfort-panel-toggle'.
 
 (declare-function jsonrpc-async-request "jsonrpc")
+(declare-function jsonrpc-running-p "jsonrpc")
 (declare-function lsp-request-async "lsp-mode")
 (declare-function lsp-workspaces "lsp-mode")
 
-(defcustom dimfort-panel-enabled nil
+(defcustom dimfort-panel-enabled t
   "Whether to open the side panel automatically when the server attaches.
 
-Closed by default — open it on demand with `dimfort-panel-toggle'."
+On by default — set to nil to keep it closed and open it on demand
+with `dimfort-panel-toggle'."
   :type 'boolean)
 
 (defcustom dimfort-panel-side 'right
@@ -666,10 +694,6 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
         (dolist (v vs)
           (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
           (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "(none)")))))
-        (setq rows (append rows
-                           (list (concat pad "  " (dimfort--pad "line" 4) "  "
-                                         (dimfort--pad "name" name-w) "  "
-                                         (dimfort--pad "unit" unit-w)))))
         (dolist (v vs)
           (let* ((unit (or (dimfort--field v "unit") "(none)"))
                  (kind (dimfort--field v "kind"))
@@ -748,12 +772,18 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
     (and buf (get-buffer-window buf t))))
 
 (defun dimfort--panel-display-action ()
-  "Return the `display-buffer' action placing the panel on its side."
+  "Return the `display-buffer' action placing the panel on its side.
+
+The `no-delete-other-windows' parameter keeps the panel alive through
+`delete-other-windows' / `C-x 1' / the ESC-ESC-ESC quit, so it behaves
+like a pinned sidebar rather than vanishing on the first quit."
   (if (eq dimfort-panel-side 'bottom)
       `((display-buffer-in-side-window) (side . bottom)
-        (window-height . ,dimfort-panel-height))
+        (window-height . ,dimfort-panel-height)
+        (window-parameters . ((no-delete-other-windows . t))))
     `((display-buffer-in-side-window) (side . ,dimfort-panel-side)
-      (window-width . ,dimfort-panel-width))))
+      (window-width . ,dimfort-panel-width)
+      (window-parameters . ((no-delete-other-windows . t))))))
 
 (defun dimfort--uri-of (buf)
   "Return the file:// URI for BUF, preferring the active client's helper."
@@ -774,21 +804,34 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
                           :character (- (point) (line-beginning-position))))))
 
 (defun dimfort--panel-request (buf params callback)
-  "Send `dimfort/panelInfo' with PARAMS for BUF, calling CALLBACK on the result."
+  "Send `dimfort/panelInfo' with PARAMS for BUF, calling CALLBACK on the result.
+
+Guards against a server that is absent or mid-restart: a debounce timer
+can fire while `dimfort-restart' has shut the old process down, and
+issuing a request against a finished jsonrpc connection would otherwise
+raise \"Process EGLOT ... not running\"."
   (with-current-buffer buf
-    (cond
-     ((and (featurep 'eglot) (fboundp 'eglot-current-server)
-           (fboundp 'jsonrpc-async-request) (eglot-current-server))
-      (jsonrpc-async-request
-       (eglot-current-server) :dimfort/panelInfo params
-       :success-fn callback
-       :error-fn (lambda (_e) (dimfort--panel-paint '("(DimFort panel error)") nil))
-       :timeout 2))
-     ((and (featurep 'lsp-mode) (fboundp 'lsp-request-async)
-           (fboundp 'lsp-workspaces) (lsp-workspaces))
-      (lsp-request-async "dimfort/panelInfo" params callback
-                         :error-handler #'ignore))
-     (t (dimfort--panel-paint '("(DimFort LSP not attached)") nil)))))
+    (let ((server (and (featurep 'eglot) (fboundp 'eglot-current-server)
+                       (eglot-current-server))))
+      (cond
+       ((and server (fboundp 'jsonrpc-async-request)
+             (or (not (fboundp 'jsonrpc-running-p))
+                 (jsonrpc-running-p server)))
+        (condition-case nil
+            (jsonrpc-async-request
+             server :dimfort/panelInfo params
+             :success-fn callback
+             :error-fn (lambda (_e)
+                         (dimfort--panel-paint '("(DimFort panel error)") nil))
+             :timeout 2)
+          (error (dimfort--panel-paint '("(DimFort server restarting...)") nil))))
+       ((and (featurep 'lsp-mode) (fboundp 'lsp-request-async)
+             (fboundp 'lsp-workspaces) (lsp-workspaces))
+        (condition-case nil
+            (lsp-request-async "dimfort/panelInfo" params callback
+                               :error-handler #'ignore)
+          (error (dimfort--panel-paint '("(DimFort server restarting...)") nil))))
+       (t (dimfort--panel-paint '("(DimFort LSP not attached)") nil))))))
 
 (defun dimfort--panel-refresh ()
   "Re-request panel info for the current source buffer and repaint."

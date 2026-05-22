@@ -55,7 +55,6 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-completion-enabled`      | `t`         | Server provides unit-name completion. |
 | `dimfort-code-actions-enabled`    | `t`         | Server advertises code actions. |
 | `dimfort-goto-definition-enabled` | `t`         | Server answers textDocument/definition. |
-| `dimfort-code-lens-enabled`       | `nil`       | Server advertises code lens. |
 | `dimfort-trace-hover-enabled`     | `t`         | Hovers default to the full unit-algebra trace (Detailed). |
 | `dimfort-hover-function-calls`    | `"short"`   | Hover detail for function calls (`short` / `detailed`). |
 | `dimfort-hover-subroutine-calls`  | `"short"`   | Hover detail for subroutine calls. |
@@ -65,7 +64,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
 | `dimfort-external-modules`        | `nil`       | Modules treated as out-of-workset (silences U007). |
 | `dimfort-fortran-modes`           | `(f90-mode fortran-mode)` | Modes DimFort registers for. |
-| `dimfort-panel-enabled`           | `nil`       | Open the side panel automatically on attach (off — open on demand). |
+| `dimfort-panel-enabled`           | `t`         | Open the side panel automatically on attach (on — set `nil` to open on demand). |
 | `dimfort-panel-side`              | `right`     | Panel dock side (`right` / `left` / `bottom`). |
 | `dimfort-panel-width`             | `0.35`      | Panel width fraction (left/right docking). |
 | `dimfort-panel-debounce`          | `0.2`       | Idle seconds before the panel cursor-follow refresh. |
@@ -82,7 +81,6 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-toggle-completion`  | Toggle unit-name completion; restarts.          |
 | `M-x dimfort-toggle-code-actions`| Toggle code actions; restarts.                  |
 | `M-x dimfort-toggle-goto-definition` | Toggle go-to-definition; restarts.          |
-| `M-x dimfort-toggle-code-lens`   | Toggle code lens; restarts.                     |
 | `M-x dimfort-toggle-trace`       | Toggle the full unit-algebra trace (Detailed hover); restarts. |
 | `M-x dimfort-cycle-hover-function-calls` | Cycle function-call hover detail (short ↔ detailed). |
 | `M-x dimfort-cycle-hover-subroutine-calls` | Cycle subroutine-call hover detail. |

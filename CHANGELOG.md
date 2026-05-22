@@ -22,11 +22,32 @@ defaults, packaging).
     function / module / program), stacked outermost-first and indented
     by nesting, each variable marked 🟢 (annotated) / 🟡 (unannotated) /
     🔴 (annotation present but unparseable).
-  - Options: `dimfort-panel-enabled` (default `nil` — open on demand),
-    `dimfort-panel-side`, `dimfort-panel-width`, `dimfort-panel-height`,
-    `dimfort-panel-debounce`, `dimfort-panel-layout`.
+  - Options: `dimfort-panel-enabled` (default `t` — opens on attach; set
+    `nil` to open on demand), `dimfort-panel-side`, `dimfort-panel-width`,
+    `dimfort-panel-height`, `dimfort-panel-debounce`, `dimfort-panel-layout`.
   - Commands: `dimfort-panel-toggle` / `-open` / `-close`. Works under
     both eglot (`jsonrpc-async-request`) and lsp-mode (`lsp-request-async`).
+
+### Changed
+
+- **Code lens removed** — the feature carried no real value in any
+  editor; the `dimfort-code-lens-enabled` option and `dimfort-toggle-code-lens`
+  command are gone.
+
+### Fixed
+
+- **`add @unit{}` cursor placement** — point now lands between the braces
+  (`@unit{|}`). A `save-excursion` around the insertion was restoring the
+  prior point and undoing the snippet's `$0` placement.
+- **Code actions on Emacs 30+** — `add @unit{}` and extract-to-PARAMETER
+  were forwarded to the server as `workspace/executeCommand` and rejected
+  (`Command 'dimfort.insertSnippet' is not defined`). Emacs 30 dispatches
+  code actions through `eglot-execute`, not the obsolete
+  `eglot-execute-command` we advised; now intercepted on both paths.
+- **Side panel** survives `delete-other-windows` / `C-x 1` / the
+  ESC-ESC-ESC quit (marked `no-delete-other-windows`).
+- **Panel refresh** no longer errors when the server is mid-restart
+  (a debounce timer firing against a finished jsonrpc connection).
 
 ## [0.1.1] — 2026-05-22
 
