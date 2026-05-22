@@ -4,7 +4,7 @@
 
 ;; Author: Victor Arrial
 ;; URL: https://github.com/ArrialVictor/DimFort-EmacsCompanion
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages, fortran, lsp, tools
 ;; SPDX-License-Identifier: MIT
@@ -30,6 +30,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'subr-x)
 
 (defgroup dimfort nil
   "Emacs companion for the DimFort Fortran unit checker."
@@ -40,8 +41,12 @@
   "Path to the dimfort binary.  Override if it's not on `exec-path'."
   :type 'string)
 
-(defcustom dimfort-inlay-hints-enabled t
-  "Whether the LSP server should emit inlay hints."
+(defcustom dimfort-inlay-hints-enabled nil
+  "Whether the LSP server should emit inlay hints.
+
+Off by default: detailed hover is the primary surface, so inlay
+hints are redundant noise beside it.  Toggle on with
+`dimfort-toggle-inlay-hints'."
   :type 'boolean)
 
 (defcustom dimfort-completion-enabled t
@@ -56,9 +61,43 @@
   "Whether the LSP server should answer textDocument/definition."
   :type 'boolean)
 
-(defcustom dimfort-code-lens-enabled t
+(defcustom dimfort-code-lens-enabled nil
   "Whether the LSP server should advertise code lens."
   :type 'boolean)
+
+(defcustom dimfort-trace-hover-enabled t
+  "Whether hovers default to the full unit-algebra trace (Detailed).
+
+When on, every hover surface is upgraded to the detailed
+rule-chain tree; the per-surface levels below still apply when
+this master switch is off."
+  :type 'boolean)
+
+(defcustom dimfort-hover-function-calls "short"
+  "Hover detail level for function calls: \"short\" or \"detailed\"."
+  :type '(choice (const "short") (const "detailed")))
+
+(defcustom dimfort-hover-subroutine-calls "short"
+  "Hover detail level for subroutine calls: \"short\" or \"detailed\"."
+  :type '(choice (const "short") (const "detailed")))
+
+(defcustom dimfort-hover-expressions "short"
+  "Hover detail level for expressions: \"short\" or \"detailed\"."
+  :type '(choice (const "short") (const "detailed")))
+
+(defcustom dimfort-cache-mode "read-write"
+  "Content-hash check cache mode forwarded to the server.
+
+\"off\" disables the cache; \"read-write\" (the default) reads and
+writes it; \"read-only\" reads but never writes."
+  :type '(choice (const "off") (const "read-only") (const "read-write")))
+
+(defcustom dimfort-cache-dir ""
+  "Directory for the content-hash cache.
+
+Empty string means let the server pick its default location; only
+a non-empty value is forwarded as `cacheDir'."
+  :type 'string)
 
 (defcustom dimfort-max-workset-size 40
   "Cap on the number of files a single workset check loads."
@@ -76,14 +115,28 @@
 ;;; Internal helpers
 
 (defun dimfort--init-options ()
-  "Return the initializationOptions table sent to the LSP server."
-  `((inlayHintsEnabled . ,(if dimfort-inlay-hints-enabled t :json-false))
-    (completionEnabled . ,(if dimfort-completion-enabled t :json-false))
-    (codeActionsEnabled . ,(if dimfort-code-actions-enabled t :json-false))
-    (gotoDefinitionEnabled . ,(if dimfort-goto-definition-enabled t :json-false))
-    (codeLensEnabled . ,(if dimfort-code-lens-enabled t :json-false))
-    (maxWorksetSize . ,dimfort-max-workset-size)
-    (externalModules . ,(or dimfort-external-modules []))))
+  "Return the initializationOptions table sent to the LSP server.
+
+Mirrors the field set the VSCode and Neovim companions send, so all
+three clients present an identical surface to the server."
+  (let ((opts
+         `((inlayHintsEnabled . ,(if dimfort-inlay-hints-enabled t :json-false))
+           (completionEnabled . ,(if dimfort-completion-enabled t :json-false))
+           (codeActionsEnabled . ,(if dimfort-code-actions-enabled t :json-false))
+           (gotoDefinitionEnabled . ,(if dimfort-goto-definition-enabled t :json-false))
+           (codeLensEnabled . ,(if dimfort-code-lens-enabled t :json-false))
+           (traceHoverEnabled . ,(if dimfort-trace-hover-enabled t :json-false))
+           (hoverFunctionCalls . ,dimfort-hover-function-calls)
+           (hoverSubroutineCalls . ,dimfort-hover-subroutine-calls)
+           (hoverExpressions . ,dimfort-hover-expressions)
+           (cacheMode . ,dimfort-cache-mode)
+           (maxWorksetSize . ,dimfort-max-workset-size)
+           (externalModules . ,(or dimfort-external-modules [])))))
+    ;; Only forward cacheDir if the user set one; an empty string would
+    ;; shadow the server's default-cache-dir fallback.
+    (when (and dimfort-cache-dir (not (string-empty-p dimfort-cache-dir)))
+      (setq opts (append opts `((cacheDir . ,dimfort-cache-dir)))))
+    opts))
 
 (defun dimfort--command ()
   "Return the LSP server command line."
@@ -118,6 +171,69 @@ the literal text at (LINE, CHARACTER) inside the buffer for URI."
             (when cursor-mark
               (goto-char (+ insert-start cursor-mark)))))))
     (switch-to-buffer buf)))
+
+(defun dimfort--uri-to-file (uri)
+  "Return the local path for URI (handles the file:// scheme)."
+  (if (string-prefix-p "file://" uri)
+      (url-unhex-string (substring uri 7))
+    uri))
+
+(defun dimfort--field (obj key)
+  "Read string KEY from OBJ, whether a plist (eglot) or hash-table (lsp-mode)."
+  (cond
+   ((hash-table-p obj) (gethash key obj))
+   ((listp obj) (plist-get obj (intern (concat ":" key))))
+   (t nil)))
+
+(defun dimfort--pos-at (line character)
+  "Return the buffer position at 0-based LINE / CHARACTER in the current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line line)
+    (move-to-column character)
+    (point)))
+
+(defun dimfort--extract-to-parameter (uri range-start range-end
+                                          insert-line indent literal-text
+                                          target-unit default-name)
+  "Handle the `dimfort.extractToParameter' server command (H010 D1.5).
+
+Prompt for a name, validate it as a Fortran identifier, then apply
+the two-edit refactor: insert a typed PARAMETER declaration at the
+end of the enclosing routine's decl block, and replace the literal
+at the use site with the new name.  RANGE-START / RANGE-END are LSP
+Position objects (plist under eglot, hash-table under lsp-mode)."
+  (let* ((file (dimfort--uri-to-file uri))
+         (buf (find-file-noselect file))
+         (name (read-string
+                (format "Parameter name for %s (%s): " literal-text target-unit)
+                nil nil default-name)))
+    (when (and name (not (string-empty-p name)))
+      (unless (string-match-p "\\`[A-Za-z][A-Za-z0-9_]*\\'" name)
+        (user-error
+         "DimFort: invalid Fortran identifier — must start with a letter, then letters/digits/_"))
+      (with-current-buffer buf
+        (save-excursion
+          (let* ((s-line (dimfort--field range-start "line"))
+                 (s-char (dimfort--field range-start "character"))
+                 (e-line (dimfort--field range-end "line"))
+                 (e-char (dimfort--field range-end "character"))
+                 ;; Markers survive the decl-line insertion below, so the
+                 ;; literal is replaced at the right spot regardless of
+                 ;; whether the insertion sits above or below it.
+                 (m-start (copy-marker (dimfort--pos-at s-line s-char)))
+                 (m-end (copy-marker (dimfort--pos-at e-line e-char)))
+                 (decl (format "%sreal, parameter :: %s = %s   !< @unit{%s}\n"
+                               indent name literal-text target-unit)))
+            (goto-char (point-min))
+            (forward-line insert-line)
+            (insert decl)
+            (delete-region m-start m-end)
+            (goto-char m-start)
+            (insert name)
+            (set-marker m-start nil)
+            (set-marker m-end nil))))
+      (switch-to-buffer buf))))
 
 
 ;;; eglot integration
@@ -203,10 +319,13 @@ server restart)."
               #'dimfort--schedule-inlay-refresh)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
-  "Intercept the DimFort-specific workspace command before eglot's generic path."
-  (if (equal command "dimfort.insertSnippet")
-      (apply #'dimfort--insert-snippet (append arguments nil))
-    (apply orig server command arguments rest)))
+  "Intercept the DimFort-specific workspace commands before eglot's generic path."
+  (cond
+   ((equal command "dimfort.insertSnippet")
+    (apply #'dimfort--insert-snippet (append arguments nil)))
+   ((equal command "dimfort.extractToParameter")
+    (apply #'dimfort--extract-to-parameter (append arguments nil)))
+   (t (apply orig server command arguments rest))))
 
 
 ;;; lsp-mode integration
@@ -237,6 +356,11 @@ server restart)."
                  (lambda (action)
                    (let* ((args (gethash "arguments" action)))
                      (apply #'dimfort--insert-snippet (append args nil))))
+                 m)
+        (puthash "dimfort.extractToParameter"
+                 (lambda (action)
+                   (let* ((args (gethash "arguments" action)))
+                     (apply #'dimfort--extract-to-parameter (append args nil))))
                  m)
         m)))))
 
@@ -341,6 +465,41 @@ otherwise."
 (dimfort--define-toggle dimfort-toggle-code-lens
                         dimfort-code-lens-enabled
                         "code lens")
+(dimfort--define-toggle dimfort-toggle-trace
+                        dimfort-trace-hover-enabled
+                        "full unit trace")
+
+;; Cycle an enum-valued setting through VALUES and restart. Used for
+;; the per-surface hover Short <-> Detailed and the cache off <->
+;; read-write toggles.
+(defmacro dimfort--define-cycle (name var label values)
+  "Define an interactive command cycling VAR through VALUES, shown as LABEL."
+  `(progn
+     ;;;###autoload
+     (defun ,name ()
+       ,(format "Cycle %s and restart the DimFort language server." label)
+       (interactive)
+       (let* ((vals ,values)
+              (pos (or (cl-position ,var vals :test #'equal) -1))
+              (next (nth (mod (1+ pos) (length vals)) vals)))
+         (setq ,var next)
+         (message "DimFort: %s -> %s" ,label next)
+         (dimfort-restart)))))
+
+(dimfort--define-cycle dimfort-cycle-hover-function-calls
+                       dimfort-hover-function-calls
+                       "hover (function calls)" '("short" "detailed"))
+(dimfort--define-cycle dimfort-cycle-hover-subroutine-calls
+                       dimfort-hover-subroutine-calls
+                       "hover (subroutine calls)" '("short" "detailed"))
+(dimfort--define-cycle dimfort-cycle-hover-expressions
+                       dimfort-hover-expressions
+                       "hover (expressions)" '("short" "detailed"))
+;; Binary cache toggle flips off <-> read-write; the middle read-only
+;; mode is reachable via `M-x customize-variable RET dimfort-cache-mode'.
+(dimfort--define-cycle dimfort-toggle-cache
+                       dimfort-cache-mode
+                       "cache" '("off" "read-write"))
 
 ;;;###autoload
 (defun dimfort-status ()
@@ -359,6 +518,13 @@ are on — invoke this to see the live state."
       (format "  code actions      : %s\n" (flag dimfort-code-actions-enabled))
       (format "  go-to-definition  : %s\n" (flag dimfort-goto-definition-enabled))
       (format "  code lens         : %s\n" (flag dimfort-code-lens-enabled))
+      (format "  full unit trace   : %s\n" (flag dimfort-trace-hover-enabled))
+      (format "  hover (functions) : %s\n" dimfort-hover-function-calls)
+      (format "  hover (subs)      : %s\n" dimfort-hover-subroutine-calls)
+      (format "  hover (exprs)     : %s\n" dimfort-hover-expressions)
+      (format "  cache             : %s\n" dimfort-cache-mode)
+      (format "  cache dir         : %s\n"
+              (if (string-empty-p dimfort-cache-dir) "(default)" dimfort-cache-dir))
       (format "  max workset size  : %d\n" dimfort-max-workset-size)
       (format "  external modules  : %s"
               (if dimfort-external-modules

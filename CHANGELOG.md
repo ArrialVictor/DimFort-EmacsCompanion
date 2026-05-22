@@ -10,6 +10,32 @@ defaults, packaging).
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-22
+
+Feature-parity catch-up with the VSCode and Neovim companions. All
+new options forward through `initializationOptions`, so the server
+sees an identical surface across the three clients.
+
+### Added
+
+- **Content-hash cache** — `dimfort-cache-mode` (default `read-write`;
+  also `off` / `read-only`) and `dimfort-cache-dir`. Toggle off ↔
+  read-write with `dimfort-toggle-cache`.
+- **Per-surface hover detail + trace** — `dimfort-trace-hover-enabled`
+  (default on; master switch to Detailed) plus
+  `dimfort-hover-function-calls` / `-subroutine-calls` / `-expressions`
+  (`short` / `detailed`). Commands: `dimfort-toggle-trace` and the
+  `dimfort-cycle-hover-*` cyclers.
+- **Extract-literal-to-PARAMETER** — handles `dimfort.extractToParameter`
+  behind the H010 quick-fix: prompts for a name, validates it as a
+  Fortran identifier, and applies the two-edit refactor.
+
+### Changed
+
+- Defaults aligned with the other companions: **inlay hints off** and
+  **code lens off** by default (detailed hover is the primary surface).
+- `dimfort-status` now reports trace, per-surface hover, and cache state.
+
 ## [0.1.0] — 2026-05-19
 
 First public release. The `dimfort.el` header has carried

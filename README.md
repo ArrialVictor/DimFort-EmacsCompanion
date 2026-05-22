@@ -51,11 +51,17 @@ All variables live under `M-x customize-group RET dimfort`:
 | Variable                          | Default     | Effect |
 |-----------------------------------|-------------|--------|
 | `dimfort-executable`              | `"dimfort"` | Path to the `dimfort` binary. |
-| `dimfort-inlay-hints-enabled`     | `t`         | Server emits inlay hints. |
+| `dimfort-inlay-hints-enabled`     | `nil`       | Server emits inlay hints (off — detailed hover is the primary surface). |
 | `dimfort-completion-enabled`      | `t`         | Server provides unit-name completion. |
 | `dimfort-code-actions-enabled`    | `t`         | Server advertises code actions. |
 | `dimfort-goto-definition-enabled` | `t`         | Server answers textDocument/definition. |
-| `dimfort-code-lens-enabled`       | `t`         | Server advertises code lens. |
+| `dimfort-code-lens-enabled`       | `nil`       | Server advertises code lens. |
+| `dimfort-trace-hover-enabled`     | `t`         | Hovers default to the full unit-algebra trace (Detailed). |
+| `dimfort-hover-function-calls`    | `"short"`   | Hover detail for function calls (`short` / `detailed`). |
+| `dimfort-hover-subroutine-calls`  | `"short"`   | Hover detail for subroutine calls. |
+| `dimfort-hover-expressions`       | `"short"`   | Hover detail for expressions. |
+| `dimfort-cache-mode`              | `"read-write"` | Content-hash check cache (`off` / `read-only` / `read-write`). |
+| `dimfort-cache-dir`               | `""`        | Cache directory (empty = server default). |
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
 | `dimfort-external-modules`        | `nil`       | Modules treated as out-of-workset (silences U007). |
 | `dimfort-fortran-modes`           | `(f90-mode fortran-mode)` | Modes DimFort registers for. |
@@ -72,6 +78,11 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-toggle-code-actions`| Toggle code actions; restarts.                  |
 | `M-x dimfort-toggle-goto-definition` | Toggle go-to-definition; restarts.          |
 | `M-x dimfort-toggle-code-lens`   | Toggle code lens; restarts.                     |
+| `M-x dimfort-toggle-trace`       | Toggle the full unit-algebra trace (Detailed hover); restarts. |
+| `M-x dimfort-cycle-hover-function-calls` | Cycle function-call hover detail (short ↔ detailed). |
+| `M-x dimfort-cycle-hover-subroutine-calls` | Cycle subroutine-call hover detail. |
+| `M-x dimfort-cycle-hover-expressions` | Cycle expression hover detail.             |
+| `M-x dimfort-toggle-cache`       | Toggle the content-hash cache (off ↔ read-write); restarts. |
 
 ## What you get
 
