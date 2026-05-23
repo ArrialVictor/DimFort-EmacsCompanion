@@ -37,7 +37,7 @@ contains
     d         = c_sound * t            ! OK:   m = (m/s)*s
     bogus     = c_sound * t            ! H001: kg = m  (mismatch)
     t_celsius = t - 273.15             ! H010: bare 273.15 literal
-    ref_pressure = dynamic_pressure(c_sound)
+    ref_pressure = dynamic_pressure(0.5 * c_sound)
   end subroutine checks
 end module qa_mod
 ```
@@ -122,14 +122,20 @@ shows in the echo area (or open a window with `M-x eldoc-doc-buffer`).
         🟢  t       : s
       ```
 
-      and the **call** `dynamic_pressure` (line 21) shows the
-      formal-vs-actual pairing:
+      and the **call** `dynamic_pressure` (line 21) gains a sub-tree under
+      its computed argument (`0.5 * c_sound`) — the difference from Short,
+      which lists only the formal-vs-actual pairing:
 
       ```
       🟢 DimFort
       dynamic_pressure : Pa
-        🟢  v : m/s   ◂   c_sound : m/s
+        🟢  v : m/s   ◂   0.5 * c_sound : m/s
+              0.5     : 1
+              c_sound : m/s
       ```
+
+      (On Short the same call shows just the `v : m/s ◂ 0.5 * c_sound : m/s`
+      row, no sub-tree.)
 
 - [ ] Cycle once more → back to `disabled`; hovers go silent again.
 
@@ -191,12 +197,14 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       ```
 
 - [ ] **Function call with arguments** — point on the call name
-      `dynamic_pressure` in line 21. The call resolves to its result unit
-      and lists each argument as a child:
+      `dynamic_pressure` in line 21. The call resolves to its result unit,
+      and the computed argument breaks down beneath it:
 
       ```
-      dynamic_pressure(c_sound) : kg/(m×s²)  🟢
-      └── c_sound               : m/s        🟢
+      dynamic_pressure(0.5 * c_sound) : kg/(m×s²)  🟢
+      └── 0.5 * c_sound               : m/s        🟢 (R4.2)
+          ├── 0.5                     : 1          🟢
+          └── c_sound                 : m/s        🟢
       ```
 
 - [ ] **Stacked scopes** — with point in line 10 (inside the function),
