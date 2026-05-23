@@ -38,7 +38,13 @@ contains
     bogus     = c_sound * t            ! H001: kg = m  (mismatch)
     t_celsius = t - 273.15             ! H010: bare 273.15 literal
     ref_pressure = dynamic_pressure(0.5 * c_sound)
+    call scale_pressure(2.0 * ref_pressure)        ! subroutine call
   end subroutine checks
+
+  subroutine scale_pressure(p)
+    real, intent(in) :: p   !< @unit{Pa}
+    ref_pressure = p
+  end subroutine scale_pressure
 end module qa_mod
 ```
 
@@ -137,6 +143,12 @@ shows in the echo area (or open a window with `M-x eldoc-doc-buffer`).
       (On Short the same call shows just the `v : m/s ◂ 0.5 * c_sound : m/s`
       row, no sub-tree.)
 
+- [ ] **Subroutine call** — still in `detailed`, hover the call name
+      `scale_pressure` (line 22). Same formal-vs-actual layout as a
+      function call, **but no return unit in the header** (subroutines
+      don't return): `p : Pa ◂ 2.0 * ref_pressure : Pa`, with the argument
+      sub-tree beneath.
+
 - [ ] Cycle once more → back to `disabled`; hovers go silent again.
 
 ## Inlay hints
@@ -205,6 +217,17 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       └── 0.5 * c_sound               : m/s        🟢 (R4.2)
           ├── 0.5                     : 1          🟢
           └── c_sound                 : m/s        🟢
+      ```
+
+- [ ] **Subroutine call** — point on the call name `scale_pressure` in
+      line 22. A subroutine has no return unit, so the root carries none
+      (🟡), but the computed argument still expands beneath it:
+
+      ```
+      call scale_pressure(2.0 * ref_pressure)              🟡
+      └── 2.0 * ref_pressure                  : kg/(m×s²)  🟢 (R4.2)
+          ├── 2.0                             : 1          🟢
+          └── ref_pressure                    : kg/(m×s²)  🟢
       ```
 
 - [ ] **Stacked scopes** — with point in line 10 (inside the function),
