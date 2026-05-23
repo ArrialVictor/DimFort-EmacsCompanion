@@ -10,6 +10,15 @@ defaults, packaging).
 
 ## [Unreleased]
 
+### Changed
+
+- **Hover settings collapsed into one `dimfort-hover`** option
+  (`disabled` / `short` / `detailed`), replacing `dimfort-trace-hover-enabled`
+  and the three per-surface `dimfort-hover-*` levels. `dimfort-cycle-hover`
+  replaces the old trace toggle and dial cyclers. Defaults to `disabled`:
+  the side panel (on by default) is the unit surface, so hovers are off
+  until you opt in. The panel is always detailed regardless of this setting.
+
 ## [0.1.2] — 2026-05-22
 
 ### Added

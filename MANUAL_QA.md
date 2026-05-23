@@ -59,10 +59,7 @@ to finish, then walk the sections below.
         completion        : on
         code actions      : on
         go-to-definition  : on
-        full unit trace   : on
-        hover (functions) : short
-        hover (subs)      : short
-        hover (exprs)     : short
+        hover             : disabled
         cache             : read-write
         cache dir         : (default)
         max workset size  : 40
@@ -95,28 +92,28 @@ diagnostics on line 14, then undo (`C-/`):
 
 ## Hover
 
-Point at the symbol; eldoc shows in the echo area (or open a window with
-`M-x eldoc-doc-buffer`).
+Hover is **disabled by default** (the panel is the unit surface). Enable
+it to test: `M-x dimfort-cycle-hover` cycles `disabled → short →
+detailed`, restarting the server each time. Point at the symbol; eldoc
+shows in the echo area (or open a window with `M-x eldoc-doc-buffer`).
 
-- [ ] On **`c_sound`**:
+- [ ] **Disabled (default)** — hovering a symbol shows nothing.
+- [ ] **Short** — cycle once to `short`. On **`c_sound`**:
 
       ```
       🟢 DimFort
       c_sound : m/s
       ```
 
-- [ ] On the **call** `dynamic_pressure` (line 21), the formal-vs-actual
-      pairing per argument:
+      and on the product `c_sound * t` (line 18), one compact line:
 
       ```
       🟢 DimFort
-      dynamic_pressure : Pa
-        🟢  v : m/s   ◂   c_sound : m/s
+      c_sound * t : m
       ```
 
-- [ ] **Trace toggle is observable** — hover over the product `c_sound * t`
-      in line 18. With trace **on** (the default) the hover breaks the
-      expression down across multiple lines (each operand with its unit):
+- [ ] **Detailed** — cycle once more to `detailed`. The same product now
+      breaks down across lines:
 
       ```
       🟢 DimFort
@@ -125,15 +122,16 @@ Point at the symbol; eldoc shows in the echo area (or open a window with
         🟢  t       : s
       ```
 
-      Run `M-x dimfort-toggle-trace` and hover again — it collapses to the
-      single compact line:
+      and the **call** `dynamic_pressure` (line 21) shows the
+      formal-vs-actual pairing:
 
       ```
       🟢 DimFort
-      c_sound * t : m
+      dynamic_pressure : Pa
+        🟢  v : m/s   ◂   c_sound : m/s
       ```
 
-      Toggle once more to restore the breakdown.
+- [ ] Cycle once more → back to `disabled`; hovers go silent again.
 
 ## Inlay hints
 

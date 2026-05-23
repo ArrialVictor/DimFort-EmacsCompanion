@@ -55,10 +55,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-completion-enabled`      | `t`         | Server provides unit-name completion. |
 | `dimfort-code-actions-enabled`    | `t`         | Server advertises code actions. |
 | `dimfort-goto-definition-enabled` | `t`         | Server answers textDocument/definition. |
-| `dimfort-trace-hover-enabled`     | `t`         | Hovers default to the full unit-algebra trace (Detailed). |
-| `dimfort-hover-function-calls`    | `"short"`   | Hover detail for function calls (`short` / `detailed`). |
-| `dimfort-hover-subroutine-calls`  | `"short"`   | Hover detail for subroutine calls. |
-| `dimfort-hover-expressions`       | `"short"`   | Hover detail for expressions. |
+| `dimfort-hover`                   | `"disabled"`| Hover verbosity: `disabled` / `short` / `detailed`. Off by default — the side panel is the unit surface. |
 | `dimfort-cache-mode`              | `"read-write"` | Content-hash check cache (`off` / `read-only` / `read-write`). |
 | `dimfort-cache-dir`               | `""`        | Cache directory (empty = server default). |
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
@@ -81,10 +78,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-toggle-completion`  | Toggle unit-name completion; restarts.          |
 | `M-x dimfort-toggle-code-actions`| Toggle code actions; restarts.                  |
 | `M-x dimfort-toggle-goto-definition` | Toggle go-to-definition; restarts.          |
-| `M-x dimfort-toggle-trace`       | Toggle the full unit-algebra trace (Detailed hover); restarts. |
-| `M-x dimfort-cycle-hover-function-calls` | Cycle function-call hover detail (short ↔ detailed). |
-| `M-x dimfort-cycle-hover-subroutine-calls` | Cycle subroutine-call hover detail. |
-| `M-x dimfort-cycle-hover-expressions` | Cycle expression hover detail.             |
+| `M-x dimfort-cycle-hover`        | Cycle hover verbosity (disabled → short → detailed); restarts. |
 | `M-x dimfort-toggle-cache`       | Toggle the content-hash cache (off ↔ read-write); restarts. |
 | `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel (Expression + Scope). |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |

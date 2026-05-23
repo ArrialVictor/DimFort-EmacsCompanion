@@ -61,25 +61,15 @@ hints are redundant noise beside it.  Toggle on with
   "Whether the LSP server should answer textDocument/definition."
   :type 'boolean)
 
-(defcustom dimfort-trace-hover-enabled t
-  "Whether hovers default to the full unit-algebra trace (Detailed).
+(defcustom dimfort-hover "disabled"
+  "Hover verbosity: \"disabled\", \"short\", or \"detailed\".
 
-When on, every hover surface is upgraded to the detailed
-rule-chain tree; the per-surface levels below still apply when
-this master switch is off."
-  :type 'boolean)
-
-(defcustom dimfort-hover-function-calls "short"
-  "Hover detail level for function calls: \"short\" or \"detailed\"."
-  :type '(choice (const "short") (const "detailed")))
-
-(defcustom dimfort-hover-subroutine-calls "short"
-  "Hover detail level for subroutine calls: \"short\" or \"detailed\"."
-  :type '(choice (const "short") (const "detailed")))
-
-(defcustom dimfort-hover-expressions "short"
-  "Hover detail level for expressions: \"short\" or \"detailed\"."
-  :type '(choice (const "short") (const "detailed")))
+\"disabled\" shows no hover at all; \"short\" a one-line summary;
+\"detailed\" the full unit-algebra tree.  Defaults to \"disabled\"
+because the side panel (on by default) is the unit surface — set it
+to \"short\" / \"detailed\" to also get hovers, or cycle with
+`dimfort-cycle-hover'.  The panel is unaffected by this setting."
+  :type '(choice (const "disabled") (const "short") (const "detailed")))
 
 (defcustom dimfort-cache-mode "read-write"
   "Content-hash check cache mode forwarded to the server.
@@ -120,10 +110,7 @@ three clients present an identical surface to the server."
            (completionEnabled . ,(if dimfort-completion-enabled t :json-false))
            (codeActionsEnabled . ,(if dimfort-code-actions-enabled t :json-false))
            (gotoDefinitionEnabled . ,(if dimfort-goto-definition-enabled t :json-false))
-           (traceHoverEnabled . ,(if dimfort-trace-hover-enabled t :json-false))
-           (hoverFunctionCalls . ,dimfort-hover-function-calls)
-           (hoverSubroutineCalls . ,dimfort-hover-subroutine-calls)
-           (hoverExpressions . ,dimfort-hover-expressions)
+           (hover . ,dimfort-hover)
            (cacheMode . ,dimfort-cache-mode)
            (maxWorksetSize . ,dimfort-max-workset-size)
            (externalModules . ,(or dimfort-external-modules [])))))
@@ -497,13 +484,10 @@ otherwise."
 (dimfort--define-toggle dimfort-toggle-goto-definition
                         dimfort-goto-definition-enabled
                         "go-to-definition")
-(dimfort--define-toggle dimfort-toggle-trace
-                        dimfort-trace-hover-enabled
-                        "full unit trace")
 
 ;; Cycle an enum-valued setting through VALUES and restart. Used for
-;; the per-surface hover Short <-> Detailed and the cache off <->
-;; read-write toggles.
+;; the hover Disabled/Short/Detailed and the cache off <-> read-write
+;; toggles.
 (defmacro dimfort--define-cycle (name var label values)
   "Define an interactive command cycling VAR through VALUES, shown as LABEL."
   `(progn
@@ -518,15 +502,9 @@ otherwise."
          (message "DimFort: %s -> %s" ,label next)
          (dimfort-restart)))))
 
-(dimfort--define-cycle dimfort-cycle-hover-function-calls
-                       dimfort-hover-function-calls
-                       "hover (function calls)" '("short" "detailed"))
-(dimfort--define-cycle dimfort-cycle-hover-subroutine-calls
-                       dimfort-hover-subroutine-calls
-                       "hover (subroutine calls)" '("short" "detailed"))
-(dimfort--define-cycle dimfort-cycle-hover-expressions
-                       dimfort-hover-expressions
-                       "hover (expressions)" '("short" "detailed"))
+(dimfort--define-cycle dimfort-cycle-hover
+                       dimfort-hover
+                       "hover" '("disabled" "short" "detailed"))
 ;; Binary cache toggle flips off <-> read-write; the middle read-only
 ;; mode is reachable via `M-x customize-variable RET dimfort-cache-mode'.
 (dimfort--define-cycle dimfort-toggle-cache
@@ -549,10 +527,7 @@ are on — invoke this to see the live state."
       (format "  completion        : %s\n" (flag dimfort-completion-enabled))
       (format "  code actions      : %s\n" (flag dimfort-code-actions-enabled))
       (format "  go-to-definition  : %s\n" (flag dimfort-goto-definition-enabled))
-      (format "  full unit trace   : %s\n" (flag dimfort-trace-hover-enabled))
-      (format "  hover (functions) : %s\n" dimfort-hover-function-calls)
-      (format "  hover (subs)      : %s\n" dimfort-hover-subroutine-calls)
-      (format "  hover (exprs)     : %s\n" dimfort-hover-expressions)
+      (format "  hover             : %s\n" dimfort-hover)
       (format "  cache             : %s\n" dimfort-cache-mode)
       (format "  cache dir         : %s\n"
               (if (string-empty-p dimfort-cache-dir) "(default)" dimfort-cache-dir))
