@@ -189,9 +189,13 @@ at the use site with the new name.  RANGE-START / RANGE-END are LSP
 Position objects (plist under eglot, hash-table under lsp-mode)."
   (let* ((file (dimfort--uri-to-file uri))
          (buf (find-file-noselect file))
+         ;; Pre-fill DEFAULT-NAME as editable initial input (like Nvim's
+         ;; vim.ui.input default and VSCode's showInputBox value), not as
+         ;; read-string's DEFAULT-VALUE — that only kicks in on empty
+         ;; input and isn't shown, so the user saw no proposed name.
          (name (read-string
                 (format "Parameter name for %s (%s): " literal-text target-unit)
-                nil nil default-name)))
+                default-name)))
     (when (and name (not (string-empty-p name)))
       (unless (string-match-p "\\`[A-Za-z][A-Za-z0-9_]*\\'" name)
         (user-error
