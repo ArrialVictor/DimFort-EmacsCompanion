@@ -83,6 +83,35 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel (Expression + Scope). |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
 
+## Side panel
+
+`M-x dimfort-panel-toggle` opens a persistent side window that follows
+the cursor and shows two stacked sections:
+
+- **Expression** — the unit-algebra tree for the expression under the
+  cursor: each node with its resolved unit, the rule that produced it,
+  and a 🟢 / 🟡 / 🔴 marker. The same content as the detailed hover, but
+  it stays visible while you edit — handy for debugging a mismatch or
+  walking through code with someone.
+- **Scope** — the declarations of every *enclosing* scope, stacked
+  outermost-first and indented by nesting (a module's declarations,
+  then a contained subroutine's locals). Each variable is marked 🟢
+  (annotated) or 🟡 (unannotated), so annotation gaps stand out.
+
+On by default (opens on attach); set `dimfort-panel-enabled` to `nil`
+to keep it closed and open it on demand. Dock side and width are set
+via `dimfort-panel-side` and `dimfort-panel-width`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ArrialVictor/DimFort/main/docs/img/panel-emacs-hero_dark.png">
+  <img width="640" src="https://raw.githubusercontent.com/ArrialVictor/DimFort/main/docs/img/panel-emacs-hero_light.png" alt="DimFort side panel in Emacs — the unit-algebra tree for q = 0.5 * rho * v * v with the stacked module/function scope below">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ArrialVictor/DimFort/main/docs/img/panel-emacs-mismatch_dark.png">
+  <img width="640" src="https://raw.githubusercontent.com/ArrialVictor/DimFort/main/docs/img/panel-emacs-mismatch_light.png" alt="DimFort side panel in Emacs — a kg ≠ m homogeneity violation, the assignment root marked red">
+</picture>
+
 ## What you get
 
 Same surface as the VSCode companion:
@@ -90,7 +119,7 @@ Same surface as the VSCode companion:
 - Diagnostics (H001–H004, U001/U002/U005–U007/U010, …) in the buffer
   via `flymake` (eglot) or `flycheck`/`lsp-ui` (lsp-mode).
 - Hover docs for variable units.
-- Inlay hints, code lens, go-to-definition, completion, code actions
+- Inlay hints, go-to-definition, completion, code actions
   (toggleable).
 - Workspace-wide cross-file checks driven from `use` clauses.
 
