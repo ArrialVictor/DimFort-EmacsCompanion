@@ -51,11 +51,11 @@ All variables live under `M-x customize-group RET dimfort`:
 | Variable                          | Default     | Effect |
 |-----------------------------------|-------------|--------|
 | `dimfort-executable`              | `"dimfort"` | Path to the `dimfort` binary. |
-| `dimfort-inlay-hints-enabled`     | `nil`       | Server emits inlay hints (off — detailed hover is the primary surface). |
+| `dimfort-inlay-hints-enabled`     | `nil`       | Server emits inlay hints (off — redundant beside the panel/hover). |
 | `dimfort-completion-enabled`      | `t`         | Server provides unit-name completion. |
 | `dimfort-code-actions-enabled`    | `t`         | Server advertises code actions. |
 | `dimfort-goto-definition-enabled` | `t`         | Server answers textDocument/definition. |
-| `dimfort-hover`                   | `"disabled"`| Hover verbosity: `disabled` / `short` / `detailed`. Off by default — the side panel is the unit surface. |
+| `dimfort-hover`                   | `"short"`   | Hover verbosity: `disabled` / `short` / `detailed`. Defaults to `short` — a compact unit surface beside the panel. |
 | `dimfort-cache-mode`              | `"read-write"` | Content-hash check cache (`off` / `read-only` / `read-write`). |
 | `dimfort-cache-dir`               | `""`        | Cache directory (empty = server default). |
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
@@ -96,7 +96,8 @@ the cursor and shows two stacked sections:
 - **Scope** — the declarations of every *enclosing* scope, stacked
   outermost-first and indented by nesting (a module's declarations,
   then a contained subroutine's locals). Each variable is marked 🟢
-  (annotated) or 🟡 (unannotated), so annotation gaps stand out.
+  (annotated), 🟡 (unannotated), or 🔴 (unparseable annotation), so
+  annotation gaps stand out.
 
 On by default (opens on attach); set `dimfort-panel-enabled` to `nil`
 to keep it closed and open it on demand. Dock side and width are set
