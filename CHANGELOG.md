@@ -15,9 +15,11 @@ defaults, packaging).
 - **Hover settings collapsed into one `dimfort-hover`** option
   (`disabled` / `short` / `detailed`), replacing `dimfort-trace-hover-enabled`
   and the three per-surface `dimfort-hover-*` levels. `dimfort-cycle-hover`
-  replaces the old trace toggle and dial cyclers. Defaults to `disabled`:
-  the side panel (on by default) is the unit surface, so hovers are off
-  until you opt in. The panel is always detailed regardless of this setting.
+  replaces the old trace toggle and dial cyclers.
+- **Default UX stance unified** across the VS / Nvim / Emacs companions:
+  `dimfort-hover` defaults to **`short`** and the side panel stays **on** — both
+  cursor-following unit surfaces. The panel is always detailed regardless of
+  this setting.
 
 ## [0.1.2] — 2026-05-22
 

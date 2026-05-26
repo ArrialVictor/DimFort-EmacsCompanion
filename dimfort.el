@@ -61,14 +61,13 @@ hints are redundant noise beside it.  Toggle on with
   "Whether the LSP server should answer textDocument/definition."
   :type 'boolean)
 
-(defcustom dimfort-hover "disabled"
+(defcustom dimfort-hover "short"
   "Hover verbosity: \"disabled\", \"short\", or \"detailed\".
 
 \"disabled\" shows no hover at all; \"short\" a one-line summary;
-\"detailed\" the full unit-algebra tree.  Defaults to \"disabled\"
-because the side panel (on by default) is the unit surface — set it
-to \"short\" / \"detailed\" to also get hovers, or cycle with
-`dimfort-cycle-hover'.  The panel is unaffected by this setting."
+\"detailed\" the full unit-algebra tree.  Defaults to \"short\" — a
+compact unit surface alongside the side panel (on by default).  Cycle
+with `dimfort-cycle-hover'.  The panel is unaffected by this setting."
   :type '(choice (const "disabled") (const "short") (const "detailed")))
 
 (defcustom dimfort-cache-mode "read-write"

@@ -65,7 +65,7 @@ to finish, then walk the sections below.
         completion        : on
         code actions      : on
         go-to-definition  : on
-        hover             : disabled
+        hover             : short
         cache             : read-write
         cache dir         : (default)
         max workset size  : 40
@@ -98,13 +98,12 @@ diagnostics on line 14, then undo (`C-/`):
 
 ## Hover
 
-Hover is **disabled by default** (the panel is the unit surface). Enable
-it to test: `M-x dimfort-cycle-hover` cycles `disabled → short →
-detailed`, restarting the server each time. Point at the symbol; eldoc
-shows in the echo area (or open a window with `M-x eldoc-doc-buffer`).
+Hover defaults to **`short`** (a compact unit surface beside the panel).
+`M-x dimfort-cycle-hover` cycles `disabled → short → detailed`, restarting the
+server each time. Point at the symbol; eldoc shows in the echo area (or open a
+window with `M-x eldoc-doc-buffer`).
 
-- [ ] **Disabled (default)** — hovering a symbol shows nothing.
-- [ ] **Short** — cycle once to `short`. On **`c_sound`**:
+- [ ] **Short (default)** — on **`c_sound`**:
 
       ```
       🟢 DimFort
