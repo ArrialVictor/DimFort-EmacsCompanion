@@ -58,6 +58,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-hover`                   | `"short"`   | Hover verbosity: `disabled` / `short` / `detailed`. Defaults to `short` — a compact unit surface beside the panel. |
 | `dimfort-cache-mode`              | `"read-write"` | Content-hash check cache (`off` / `read-only` / `read-write`). |
 | `dimfort-cache-dir`               | `""`        | Cache directory (empty = server default). |
+| `dimfort-scale-mode`              | `"auto"`    | Scale checking (S001/S002): `auto` defers to `.dimfort.toml`, `on`/`off` override. Cycle with `dimfort-cycle-scale`. |
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
 | `dimfort-external-modules`        | `nil`       | Modules treated as out-of-workset (silences U007). |
 | `dimfort-fortran-modes`           | `(f90-mode fortran-mode)` | Modes DimFort registers for. |
@@ -80,6 +81,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-toggle-goto-definition` | Toggle go-to-definition; restarts.          |
 | `M-x dimfort-cycle-hover`        | Cycle hover verbosity (disabled → short → detailed); restarts. |
 | `M-x dimfort-toggle-cache`       | Toggle the content-hash cache (off ↔ read-write); restarts. |
+| `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `.dimfort.toml`. |
 | `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel. |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
 | `M-x dimfort-panel-filter`       | Filter the panel's Scope section by name/unit (empty clears). |

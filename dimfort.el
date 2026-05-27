@@ -85,6 +85,15 @@ Empty string means let the server pick its default location; only
 a non-empty value is forwarded as `cacheDir'."
   :type 'string)
 
+(defcustom dimfort-scale-mode "auto"
+  "Opt-in scale/magnitude checking (S001 multiplicative, S002 affine).
+
+\"auto\" (the default) defers to the project's `.dimfort.toml'
+`[scale] enabled' — the `scaleMode' option is not forwarded, so the
+server config wins. \"on\"/\"off\" forward an explicit boolean that
+overrides the toml for the session.  Cycle with `dimfort-cycle-scale'."
+  :type '(choice (const "auto") (const "on") (const "off")))
+
 (defcustom dimfort-max-workset-size 40
   "Cap on the number of files a single workset check loads."
   :type 'integer)
@@ -118,6 +127,13 @@ three clients present an identical surface to the server."
     ;; shadow the server's default-cache-dir fallback.
     (when (and dimfort-cache-dir (not (string-empty-p dimfort-cache-dir)))
       (setq opts (append opts `((cacheDir . ,dimfort-cache-dir)))))
+    ;; Scale checking is tri-state: "auto" omits scaleMode so the server's
+    ;; .dimfort.toml [scale] enabled wins; "on"/"off" send an explicit
+    ;; boolean that overrides the toml for the session.
+    (when (member dimfort-scale-mode '("on" "off"))
+      (setq opts (append opts
+                         `((scaleMode . ,(if (equal dimfort-scale-mode "on")
+                                             t :json-false))))))
     opts))
 
 (defun dimfort--command ()
@@ -514,6 +530,11 @@ otherwise."
 (dimfort--define-cycle dimfort-toggle-cache
                        dimfort-cache-mode
                        "cache" '("off" "read-write"))
+;; Scale checking is tri-state: "auto" defers to the project .dimfort.toml,
+;; "on"/"off" override it for the session.
+(dimfort--define-cycle dimfort-cycle-scale
+                       dimfort-scale-mode
+                       "scale checking" '("auto" "on" "off"))
 
 ;;;###autoload
 (defun dimfort-status ()
@@ -533,6 +554,7 @@ are on — invoke this to see the live state."
       (format "  go-to-definition  : %s\n" (flag dimfort-goto-definition-enabled))
       (format "  hover             : %s\n" dimfort-hover)
       (format "  cache             : %s\n" dimfort-cache-mode)
+      (format "  scale checking    : %s\n" dimfort-scale-mode)
       (format "  cache dir         : %s\n"
               (if (string-empty-p dimfort-cache-dir) "(default)" dimfort-cache-dir))
       (format "  max workset size  : %d\n" dimfort-max-workset-size)

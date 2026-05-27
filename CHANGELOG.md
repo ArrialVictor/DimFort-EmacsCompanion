@@ -12,6 +12,12 @@ defaults, packaging).
 
 ### Added
 
+- **Scale-checking toggle** — a new `dimfort-scale-mode` option
+  (`"auto"` / `"on"` / `"off"`, default `"auto"`) and a
+  `dimfort-cycle-scale` command. `"auto"` defers to the project's
+  `.dimfort.toml` `[scale] enabled`; `"on"`/`"off"` force the magnitude
+  layer (S001/S002) for the session, overriding the toml. Shown in
+  `dimfort-status`.
 - **Side panel — full feature parity with the VSCode companion.** The
   panel previously showed only the Expression and Scope sections; it now
   carries the three middle sections too (shown in the `both` layout):
