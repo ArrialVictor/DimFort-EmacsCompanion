@@ -352,8 +352,8 @@ end module solver
       excludes it). Add `real :: play !< @unit{Pa}` as a local in `step`
       and `play` drops from Imports (the local shadows it; it shows under
       Scope instead).
-- [ ] **Shared filter** — `M-x dimfort-panel-filter RET play RET` narrows
-      the Imports section too (only `play` remains; `gravity_at()` drops);
-      empty clears it.
+- [ ] **Imports filter** — `M-x dimfort-imports-filter RET gravity RET`
+      narrows the Imports section to `gravity_at(m)`; `play` to `play`;
+      empty clears it. Independent of `dimfort-panel-filter` (Scope).
 - [ ] **Empty case** — point in `phys_constants` (imports nothing): the
       Imports section shows `(none)`.

@@ -622,6 +622,8 @@ with `dimfort-panel-toggle'."
 (defvar dimfort--panel-req-counter 0)
 (defvar dimfort--panel-filter ""
   "Client-side name/unit filter for the Scope section (empty = no filter).")
+(defvar dimfort--imports-filter ""
+  "Client-side name/unit/module filter for the Imports section.")
 
 ;; -- field / sequence access (payload is a plist under eglot, a
 ;; -- hash-table under lsp-mode; arrays are vectors vs lists). --
@@ -877,18 +879,24 @@ Each variable row carries a jump target to its declaration line."
 
 (defun dimfort--panel-render-imports (imports)
   "Return Imports section cells, grouped by source module.
-Variables and procedures (callables read as \"name()\"); each row
-navigates cross-file to the declaration.  The shared Scope filter
-\(`dimfort--panel-filter') narrows this section too."
-  (let* ((q (downcase (or dimfort--panel-filter "")))
+Variables and procedures (callables read as \"name(args)\"); each row
+navigates cross-file to the declaration.  Has its own name/unit/module
+filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
+  (let* ((q (downcase (or dimfort--imports-filter "")))
          (all (dimfort--seq imports))
          (ims (if (string-empty-p q) all
-                (cl-remove-if-not (lambda (im) (dimfort--import-matches im q)) all))))
+                (cl-remove-if-not (lambda (im) (dimfort--import-matches im q)) all)))
+         (header (unless (string-empty-p q)
+                   (list (dimfort--cell
+                          (format "Filter: \"%s\"  (dimfort-imports-filter to change)"
+                                  dimfort--imports-filter))
+                         (dimfort--cell "")))))
     (if (null ims)
-        (list (dimfort--cell
-               (if (and (not (string-empty-p q)) all)
-                   (format "  (no imports match \"%s\")" dimfort--panel-filter)
-                 "  (none)")))
+        (append header
+                (list (dimfort--cell
+                       (if (and (not (string-empty-p q)) all)
+                           (format "  (no imports match \"%s\")" dimfort--imports-filter)
+                         "  (none)"))))
       (let ((order '()) (groups (make-hash-table :test #'equal)) (rows '()))
         (dolist (im ims)
           (let ((m (or (dimfort--field im "module") "?")))
@@ -919,7 +927,7 @@ navigates cross-file to the declaration.  The shared Scope filter
                                "  " (dimfort--pad unit unit-w) tail)
                        target)
                       rows)))))
-        (nreverse rows)))))
+        (append header (nreverse rows))))))
 
 (defun dimfort--panel-render (payload)
   "Return the full list of panel cells for PAYLOAD."
@@ -1238,6 +1246,19 @@ filter. Client-side — repaints from the cached payload, no LSP round-trip."
   (interactive (list (read-string "Filter Scope (name/unit, empty to clear): "
                                    dimfort--panel-filter)))
   (setq dimfort--panel-filter (or query ""))
+  (when (dimfort--panel-window)
+    (dimfort--panel-paint (dimfort--panel-render dimfort--panel-last-payload) nil)))
+
+;;;###autoload
+(defun dimfort-imports-filter (query)
+  "Filter the panel's Imports section to symbols matching QUERY.
+
+Matches against the imported name, its unit, and its source module. An
+empty string clears the filter.  Its own filter, independent of the
+Scope one (`dimfort-panel-filter')."
+  (interactive (list (read-string "Filter Imports (name/unit/module, empty to clear): "
+                                   dimfort--imports-filter)))
+  (setq dimfort--imports-filter (or query ""))
   (when (dimfort--panel-window)
     (dimfort--panel-paint (dimfort--panel-render dimfort--panel-last-payload) nil)))
 

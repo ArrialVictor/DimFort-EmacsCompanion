@@ -85,6 +85,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel. |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
 | `M-x dimfort-panel-filter`       | Filter the panel's Scope section by name/unit (empty clears). |
+| `M-x dimfort-imports-filter`     | Filter the panel's Imports section by name/unit/module (empty clears). |
 
 ## Side panel
 
@@ -117,7 +118,7 @@ layout):
   (usable here but declared elsewhere), grouped by source module under a
   `from <module>` header (functions read as `name(argunits)`, showing
   their argument + return units, e.g. `force(kg)`). Rows navigate cross-file to where the imported symbol — and
-  its `@unit{}` — is declared. `M-x dimfort-panel-filter` narrows this too.
+  its `@unit{}` — is declared. `M-x dimfort-imports-filter` narrows it.
 
 Press `RET` (or `mouse-1`) on any declaration, diagnostic,
 interaction-site, or import row to jump to it (cross-file for interaction

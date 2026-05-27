@@ -38,9 +38,9 @@ defaults, packaging).
     scope (usable here but declared elsewhere), grouped by source module
     under a `from <module>` header (functions read as `name(argunits)`,
     showing their argument + return units, e.g. `force(kg)`). `RET` navigates cross-file to where the imported
-    symbol — and its `@unit{}` — is declared. The Scope filter
-    (`dimfort-panel-filter`) narrows this section too. Driven by the
-    server's `panelInfo.imports`.
+    symbol — and its `@unit{}` — is declared. Has its own name/unit/
+    module filter, `dimfort-imports-filter`. Driven by the server's
+    `panelInfo.imports`.
   - **Row navigation** — `RET` (or `mouse-1`) on a declaration,
     diagnostic, interaction-site, or import row jumps to it (cross-file
     for sites and imports); a file-wide diagnostic-count footer pins the
