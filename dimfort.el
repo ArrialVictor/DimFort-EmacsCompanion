@@ -857,22 +857,45 @@ Each variable row carries a jump target to its declaration line."
            (dimfort--cell (concat "  • " title) (list :action a))))
        as))))
 
+(defun dimfort--import-label (im)
+  "Display name for import IM — a callable reads as \"name()\"."
+  (let ((n (or (dimfort--field im "name") "?")))
+    (if (eq (dimfort--field im "callable") t) (concat n "()") n)))
+
+(defun dimfort--import-matches (im query)
+  "Non-nil when import IM's name, unit, or module contains QUERY."
+  (or (string-empty-p query)
+      (let ((name (downcase (dimfort--import-label im)))
+            (unit (downcase (or (dimfort--field im "unit") "")))
+            (mod (downcase (or (dimfort--field im "module") ""))))
+        (or (string-search query name)
+            (and (not (string-empty-p unit)) (string-search query unit))
+            (and (not (string-empty-p mod)) (string-search query mod))))))
+
 (defun dimfort--panel-render-imports (imports)
   "Return Imports section cells, grouped by source module.
-Each row navigates (cross-file) to the imported variable's declaration."
-  (let ((ims (dimfort--seq imports)))
+Variables and procedures (callables read as \"name()\"); each row
+navigates cross-file to the declaration.  The shared Scope filter
+\(`dimfort--panel-filter') narrows this section too."
+  (let* ((q (downcase (or dimfort--panel-filter "")))
+         (all (dimfort--seq imports))
+         (ims (if (string-empty-p q) all
+                (cl-remove-if-not (lambda (im) (dimfort--import-matches im q)) all))))
     (if (null ims)
-        (list (dimfort--cell "  (none)"))
+        (list (dimfort--cell
+               (if (and (not (string-empty-p q)) all)
+                   (format "  (no imports match \"%s\")" dimfort--panel-filter)
+                 "  (none)")))
       (let ((order '()) (groups (make-hash-table :test #'equal)) (rows '()))
         (dolist (im ims)
           (let ((m (or (dimfort--field im "module") "?")))
             (unless (gethash m groups) (push m order))
             (puthash m (cons im (gethash m groups)) groups)))
         (dolist (m (nreverse order))
-          (push (dimfort--cell (concat "  use " m)) rows)
+          (push (dimfort--cell (concat "  from " m)) rows)
           (let ((items (nreverse (gethash m groups))) (name-w 4) (unit-w 4))
             (dolist (im items)
-              (setq name-w (max name-w (string-width (or (dimfort--field im "name") "?"))))
+              (setq name-w (max name-w (string-width (dimfort--import-label im))))
               (setq unit-w (max unit-w
                                 (string-width (or (dimfort--field im "unit") "(none)")))))
             (dolist (im items)
@@ -884,7 +907,7 @@ Each row navigates (cross-file) to the imported variable's declaration."
                                    :column (dimfort--field im "column"))))
                 (push (dimfort--cell
                        (concat "      "
-                               (dimfort--pad (or (dimfort--field im "name") "?") name-w)
+                               (dimfort--pad (dimfort--import-label im) name-w)
                                "  " (dimfort--pad unit unit-w) tail)
                        target)
                       rows)))))
