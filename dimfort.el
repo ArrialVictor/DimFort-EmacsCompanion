@@ -30,6 +30,7 @@
 
 (require 'cl-lib)
 (require 'json)
+(require 'seq)
 (require 'subr-x)
 
 (defgroup dimfort nil
@@ -585,10 +586,20 @@ with `dimfort-panel-toggle'."
 (defconst dimfort--panel-buffer "*dimfort-panel*")
 (defconst dimfort--panel-divider (make-string 60 ?─))
 (defconst dimfort--panel-markers '(("ok" . "🟢") ("warn" . "🟡") ("error" . "🔴")))
+(defconst dimfort--panel-interaction-groups
+  '(("declares" . "Declaration")
+    ("contributes" . "Write")
+    ("requires" . "Read")
+    ("uses" . "Undetermined read"))
+  "Interaction-point kinds in display order, with their section labels.")
 (defvar dimfort--panel-timer nil)
 (defvar dimfort--panel-last-payload nil)
+(defvar dimfort--panel-last-interactions nil)
+(defvar dimfort--panel-last-actions nil)
 (defvar dimfort--panel-source-buffer nil)
 (defvar dimfort--panel-req-counter 0)
+(defvar dimfort--panel-filter ""
+  "Client-side name/unit filter for the Scope section (empty = no filter).")
 
 ;; -- field / sequence access (payload is a plist under eglot, a
 ;; -- hash-table under lsp-mode; arrays are vectors vs lists). --
@@ -607,6 +618,22 @@ with `dimfort-panel-toggle'."
   (concat s (make-string (max 0 (- w (string-width s))) ?\s)))
 
 ;; -- rendering (mirrors the Neovim panel so the two read identically) --
+;;
+;; A *cell* is (TEXT . TARGET): the display string and an optional
+;; navigation target. TARGET is nil (inert), or a plist
+;;   (:file F :line L :column C)        — jump (cross-file when :file set)
+;; or (:action ACTION)                  — a CodeAction to apply.
+;; The renderers return ordered lists of cells; `dimfort--panel-paint'
+;; stamps each line with its target as a text property so RET can act.
+
+(defun dimfort--cell (text &optional target)
+  "Make a panel cell: display TEXT with an optional navigation TARGET."
+  (cons text target))
+
+(defun dimfort--base-name (path)
+  "Return the last path component of PATH."
+  (let ((p (or path "")))
+    (if (string-match "[^/\\]+\\'" p) (match-string 0 p) p)))
 
 (defun dimfort--panel-collect-expr (node prefix is-last is-root)
   "Return an ordered list of entry plists for expression NODE and descendants.
@@ -633,7 +660,7 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
       result)))
 
 (defun dimfort--panel-render-expr (node)
-  "Return a list of aligned rows for expression NODE."
+  "Return a list of aligned cells for expression NODE."
   (let ((entries (dimfort--panel-collect-expr node "" t t))
         (tree-w 0) (unit-w 0) (rows '()))
     (dolist (e entries)
@@ -649,25 +676,35 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
                                  (make-string (- unit-w (string-width unit)) ?\s)))
                    ((> unit-w 0) (make-string (+ 3 unit-w) ?\s))
                    (t ""))))
-        (setq rows (append rows
-                           (list (concat tree tree-pad mid "  "
-                                         (plist-get e :mark) (plist-get e :rule)))))))
-    rows))
+        (push (dimfort--cell (concat tree tree-pad mid "  "
+                                     (plist-get e :mark) (plist-get e :rule)))
+              rows)))
+    (nreverse rows)))
+
+(defun dimfort--panel-var-matches (v query)
+  "Non-nil when var V's name or unit contains QUERY (case-insensitive)."
+  (or (string-empty-p query)
+      (let ((name (downcase (or (dimfort--field v "name") "")))
+            (unit (downcase (or (dimfort--field v "unit") ""))))
+        (or (string-search query name)
+            (and (not (string-empty-p unit)) (string-search query unit))))))
 
 (defun dimfort--panel-render-scope (scope vars depth)
-  "Return rows for SCOPE and its VARS, indented by nesting DEPTH."
+  "Return cells for SCOPE and its VARS, indented by nesting DEPTH.
+Each variable row carries a jump target to its declaration line."
   (let* ((pad (make-string (* 2 (or depth 0)) ?\s))
          (rows '())
          (vs (dimfort--seq vars)))
-    (setq rows
-          (list (if scope
-                    (concat pad (format "%s: %s"
-                                        (dimfort--titlecase (dimfort--field scope "kind"))
-                                        (or (dimfort--field scope "name") "")))
-                  (concat pad "Scope: (file level)"))
-                ""))
+    (push (dimfort--cell
+           (if scope
+               (concat pad (format "%s: %s"
+                                   (dimfort--titlecase (dimfort--field scope "kind"))
+                                   (or (dimfort--field scope "name") "")))
+             (concat pad "Scope: (file level)")))
+          rows)
+    (push (dimfort--cell "") rows)
     (if (null vs)
-        (append rows (list (concat pad "  (no declarations)")))
+        (push (dimfort--cell (concat pad "  (no declarations)")) rows)
       (let ((name-w 4) (unit-w 4))
         (dolist (v vs)
           (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
@@ -675,67 +712,245 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
         (dolist (v vs)
           (let* ((unit (or (dimfort--field v "unit") "(none)"))
                  (kind (dimfort--field v "kind"))
+                 (line (or (dimfort--field v "line") 0))
                  (tail (cond ((equal kind "unannotated") " 🟡")
                              ((equal kind "error") " 🔴")
                              (t " 🟢"))))
-            (setq rows (append rows
-                               (list (concat pad "  "
-                                             (dimfort--pad
-                                              (number-to-string (or (dimfort--field v "line") 0)) 4)
-                                             "  " (dimfort--pad (or (dimfort--field v "name") "") name-w)
-                                             "  " (dimfort--pad unit unit-w) tail))))))
-        rows))))
+            (push (dimfort--cell
+                   (concat pad "  " (dimfort--pad (number-to-string line) 4)
+                           "  " (dimfort--pad (or (dimfort--field v "name") "") name-w)
+                           "  " (dimfort--pad unit unit-w) tail)
+                   (list :line line))
+                  rows)))))
+    (nreverse rows)))
+
+(defun dimfort--panel-render-scope-section (payload)
+  "Return the Scope section cells for PAYLOAD, with the active filter applied."
+  (let* ((q (downcase (or dimfort--panel-filter "")))
+         (rows '())
+         (scopes (dimfort--seq (and payload (dimfort--field payload "scopes")))))
+    (unless (string-empty-p q)
+      (push (dimfort--cell (format "Filter: \"%s\"  (dimfort-panel-filter to change)"
+                                   dimfort--panel-filter))
+            rows)
+      (push (dimfort--cell "") rows))
+    (cond
+     ((and payload scopes)
+      (let ((shown nil))
+        (cl-loop for sc in scopes for i from 0 do
+                 (let* ((all (dimfort--seq (dimfort--field sc "vars")))
+                        (kept (if (string-empty-p q) all
+                                (cl-remove-if-not
+                                 (lambda (v) (dimfort--panel-var-matches v q)) all))))
+                   (when (or (string-empty-p q) kept)
+                     (when shown (push (dimfort--cell "") rows))
+                     (setq rows (append (nreverse (dimfort--panel-render-scope
+                                                   sc (vconcat kept) i))
+                                        rows))
+                     (setq shown t))))
+        (when (and (not (string-empty-p q)) (not shown))
+          (push (dimfort--cell
+                 (format "  (no variables match \"%s\")" dimfort--panel-filter))
+                rows))))
+     (payload
+      (setq rows (append (nreverse (dimfort--panel-render-scope
+                                    (or (dimfort--field payload "scope")
+                                        (dimfort--field payload "routine"))
+                                    (or (dimfort--field payload "scopeVars")
+                                        (dimfort--field payload "routineVars"))
+                                    0))
+                         rows)))
+     (t (push (dimfort--cell "Scope: (none)") rows)))
+    (nreverse rows)))
+
+(defun dimfort--panel-render-diagnostics (payload)
+  "Return Diagnostics section cells (cursor-line diagnostics) for PAYLOAD."
+  (let ((diags (dimfort--seq (and payload (dimfort--field payload "diagnostics")))))
+    (if (null diags)
+        (list (dimfort--cell "  (none)"))
+      (mapcar
+       (lambda (d)
+         (let* ((sev (or (dimfort--field d "severity") "info"))
+                (glyph (cond ((equal sev "error") "🔴")
+                             ((equal sev "warning") "🟡") (t "🔵")))
+                (code (or (dimfort--field d "code") "?"))
+                (msg (or (dimfort--field d "message") "")))
+           (dimfort--cell (concat "  " glyph " " code ": " msg)
+                          (list :line (dimfort--field d "line")
+                                :column (dimfort--field d "column")))))
+       diags))))
+
+(defun dimfort--panel-render-interactions (rep)
+  "Return Interactions section cells for the interactions report REP."
+  (let ((points (dimfort--seq (and rep (dimfort--field rep "points")))))
+    (if (null points)
+        (list (dimfort--cell "  (none)"))
+      (let ((rows '()))
+        (push (dimfort--cell (concat "  " (or (dimfort--field rep "symbol") "?"))) rows)
+        (dolist (c (dimfort--seq (dimfort--field rep "conflicts")))
+          (push (dimfort--cell
+                 (concat "  🔴 " (or (dimfort--field c "code") "?") ": "
+                         (or (dimfort--field c "message") ""))
+                 (list :file (dimfort--field c "file")
+                       :line (dimfort--field c "line")
+                       :column (dimfort--field c "column")))
+                rows))
+        (dolist (group dimfort--panel-interaction-groups)
+          (let ((kind (car group))
+                (pts '()))
+            (dolist (p points)
+              (when (equal (dimfort--field p "kind") kind) (push p pts)))
+            (setq pts (nreverse pts))
+            (push (dimfort--cell (concat "  " (cdr group))) rows)
+            (if (null pts)
+                (push (dimfort--cell "      (none)") rows)
+              (dolist (p pts)
+                (let* ((file (dimfort--field p "file"))
+                       (line (dimfort--field p "line"))
+                       (loc (concat (dimfort--base-name (dimfort--uri-to-file (or file "")))
+                                    ":" (number-to-string (or line 0))))
+                       (unit (and (not (equal kind "uses"))
+                                  (dimfort--field p "unit")))
+                       (target (list :file file :line line
+                                     :column (dimfort--field p "column")))
+                       (snippet (dimfort--field p "snippet")))
+                  (push (dimfort--cell
+                         (concat "      " loc (if unit (concat "   " unit) ""))
+                         target)
+                        rows)
+                  (when (and snippet (not (string-empty-p snippet)))
+                    (push (dimfort--cell (concat "        " snippet) target) rows)))))))
+        (nreverse rows)))))
+
+(defun dimfort--panel-render-actions (actions)
+  "Return Actions section cells for the CodeAction list ACTIONS."
+  (let ((as (dimfort--seq actions)))
+    (if (null as)
+        (list (dimfort--cell "  (none)"))
+      (mapcar
+       (lambda (a)
+         (let ((title (replace-regexp-in-string
+                       "\\`DimFort:[ \t]*" ""
+                       (or (dimfort--field a "title") "(action)"))))
+           (dimfort--cell (concat "  • " title) (list :action a))))
+       as))))
 
 (defun dimfort--panel-render (payload)
-  "Return the full list of panel rows for PAYLOAD."
+  "Return the full list of panel cells for PAYLOAD."
   (let ((rows '()))
-    (cl-flet ((add (&rest xs) (setq rows (append rows xs))))
+    (cl-flet ((add (&rest cells) (setq rows (append rows cells)))
+              (sec (title body)
+                (setq rows (append rows
+                                   (list (dimfort--cell title) (dimfort--cell ""))
+                                   body
+                                   (list (dimfort--cell ""))))))
       (when (memq dimfort-panel-layout '(both expression))
-        (add "Expression" "")
         (let ((expr (and payload (dimfort--field payload "expression"))))
-          (if expr
-              (setq rows (append rows (dimfort--panel-render-expr expr)))
-            (add "  (no expression at cursor)")))
-        (add ""))
+          (sec "Expression"
+               (if expr (dimfort--panel-render-expr expr)
+                 (list (dimfort--cell "  (no expression at cursor)"))))))
       (when (eq dimfort-panel-layout 'both)
-        (add dimfort--panel-divider ""))
+        (sec "Diagnostics" (dimfort--panel-render-diagnostics payload))
+        (sec "Interactions"
+             (dimfort--panel-render-interactions dimfort--panel-last-interactions))
+        (sec "Actions"
+             (dimfort--panel-render-actions dimfort--panel-last-actions))
+        (add (dimfort--cell dimfort--panel-divider) (dimfort--cell "")))
       (when (memq dimfort-panel-layout '(both routine))
-        (let ((scopes (dimfort--seq (and payload (dimfort--field payload "scopes")))))
-          (cond
-           ((and payload scopes)
-            (cl-loop for sc in scopes for i from 0 do
-                     (when (> i 0) (add ""))
-                     (setq rows (append rows
-                                        (dimfort--panel-render-scope
-                                         sc (dimfort--field sc "vars") i)))))
-           (payload
-            (setq rows (append rows
-                               (dimfort--panel-render-scope
-                                (or (dimfort--field payload "scope")
-                                    (dimfort--field payload "routine"))
-                                (or (dimfort--field payload "scopeVars")
-                                    (dimfort--field payload "routineVars"))
-                                0))))
-           (t (add "Scope: (none)"))))))
+        (sec "Scope" (dimfort--panel-render-scope-section payload)))
+      ;; Footer: whole-file diagnostic counts.
+      (when (and (eq dimfort-panel-layout 'both) payload
+                 (dimfort--field payload "fileDiagnosticCounts"))
+        (let ((counts (dimfort--field payload "fileDiagnosticCounts")))
+          (add (dimfort--cell dimfort--panel-divider)
+               (dimfort--cell
+                (format "File: 🔴 %s   🟡 %s"
+                        (or (dimfort--field counts "error") 0)
+                        (or (dimfort--field counts "warning") 0)))))))
     rows))
 
-(defun dimfort--panel-paint (rows stale)
-  "Write ROWS into the panel buffer; dim them when STALE."
+(defun dimfort--panel-paint (cells stale)
+  "Write CELLS into the panel buffer; dim them when STALE.
+Each cell's navigation target (if any) is stamped on its line as the
+`dimfort-target' text property so RET can act on it."
   (let ((buf (get-buffer dimfort--panel-buffer)))
     (when (buffer-live-p buf)
       (with-current-buffer buf
         (let ((inhibit-read-only t))
           (erase-buffer)
-          (insert (mapconcat #'identity rows "\n"))
+          (dolist (cell cells)
+            (let ((start (point))
+                  (text (if (consp cell) (car cell) cell))
+                  (target (and (consp cell) (cdr cell))))
+              (insert text "\n")
+              (when target
+                (put-text-property start (point) 'dimfort-target target))))
           (when stale
             (add-text-properties (point-min) (point-max) '(face shadow))))))))
 
 ;; -- window lifecycle + LSP request --
 
+(defvar dimfort-panel-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'dimfort-panel-activate)
+    (define-key map [mouse-1] #'dimfort-panel-activate)
+    map)
+  "Keymap for `dimfort-panel-mode'.")
+
 (define-derived-mode dimfort-panel-mode special-mode "DimFort-Panel"
   "Major mode for the DimFort side panel."
   (setq truncate-lines t)
   (setq-local cursor-type nil))
+
+(defun dimfort--panel-goto (target)
+  "Jump to TARGET's (:file :line :column) in a non-panel window."
+  (let* ((file (plist-get target :file))
+         (line (plist-get target :line))
+         (column (plist-get target :column))
+         (buf (if (and file (not (string-empty-p file)))
+                  (find-file-noselect (dimfort--uri-to-file file))
+                dimfort--panel-source-buffer)))
+    (when (buffer-live-p buf)
+      (let* ((pw (dimfort--panel-window))
+             (win (or (get-buffer-window buf)
+                      (seq-find (lambda (w) (not (eq w pw)))
+                                (window-list nil 'no-mini)))))
+        (if (window-live-p win) (select-window win)
+          (setq win (display-buffer buf)))
+        (when (window-live-p win)
+          (select-window win)
+          (switch-to-buffer buf)
+          (goto-char (point-min))
+          (forward-line (max 0 (1- (or line 1))))
+          (move-to-column (max 0 (1- (or column 1))))
+          (recenter))))))
+
+(defun dimfort--panel-apply-action (action)
+  "Apply the CodeAction ACTION — DimFort's own client commands, else defer."
+  (let* ((cmd (dimfort--field action "command"))
+         (name (cond ((stringp cmd) cmd)
+                     (cmd (dimfort--field cmd "command")) (t nil)))
+         (args (dimfort--seq
+                (cond ((stringp cmd) (dimfort--field action "arguments"))
+                      (cmd (dimfort--field cmd "arguments"))))))
+    (cond
+     ((equal name "dimfort.insertSnippet")
+      (apply #'dimfort--insert-snippet args))
+     ((equal name "dimfort.extractToParameter")
+      (apply #'dimfort--extract-to-parameter args))
+     ((and (featurep 'eglot) (fboundp 'eglot-execute) (fboundp 'eglot-current-server)
+           (eglot-current-server))
+      (eglot-execute (eglot-current-server) action))
+     (t (message "DimFort: cannot apply this action from the panel.")))))
+
+(defun dimfort-panel-activate ()
+  "Act on the panel row at point: jump to a location, or apply an action."
+  (interactive)
+  (let ((target (get-text-property (point) 'dimfort-target)))
+    (when target
+      (if (plist-get target :action)
+          (dimfort--panel-apply-action (plist-get target :action))
+        (dimfort--panel-goto target)))))
 
 (defun dimfort--panel-get-buffer ()
   "Return the panel buffer, creating it in `dimfort-panel-mode' if needed."
@@ -781,13 +996,14 @@ like a pinned sidebar rather than vanishing on the first quit."
           :position (list :line (1- (line-number-at-pos (point) t))
                           :character (- (point) (line-beginning-position))))))
 
-(defun dimfort--panel-request (buf params callback)
-  "Send `dimfort/panelInfo' with PARAMS for BUF, calling CALLBACK on the result.
+(defun dimfort--panel-rpc (buf method params callback)
+  "Send LSP request METHOD with PARAMS for BUF, calling CALLBACK on the result.
 
-Guards against a server that is absent or mid-restart: a debounce timer
-can fire while `dimfort-restart' has shut the old process down, and
-issuing a request against a finished jsonrpc connection would otherwise
-raise \"Process EGLOT ... not running\"."
+METHOD is the bare method string (e.g. \"dimfort/panelInfo\"). Best-effort:
+on any failure CALLBACK is simply not called, so a section keeps its last
+content rather than erroring. Guards against a server that is absent or
+mid-restart (a debounce timer can fire while `dimfort-restart' has shut the
+old process down)."
   (with-current-buffer buf
     (let ((server (and (featurep 'eglot) (fboundp 'eglot-current-server)
                        (eglot-current-server))))
@@ -795,24 +1011,53 @@ raise \"Process EGLOT ... not running\"."
        ((and server (fboundp 'jsonrpc-async-request)
              (or (not (fboundp 'jsonrpc-running-p))
                  (jsonrpc-running-p server)))
-        (condition-case nil
-            (jsonrpc-async-request
-             server :dimfort/panelInfo params
-             :success-fn callback
-             :error-fn (lambda (_e)
-                         (dimfort--panel-paint '("(DimFort panel error)") nil))
-             :timeout 2)
-          (error (dimfort--panel-paint '("(DimFort server restarting...)") nil))))
+        (ignore-errors
+          (jsonrpc-async-request
+           server (intern (concat ":" method)) params
+           :success-fn callback
+           :error-fn #'ignore
+           :timeout 2)))
        ((and (featurep 'lsp-mode) (fboundp 'lsp-request-async)
              (fboundp 'lsp-workspaces) (lsp-workspaces))
-        (condition-case nil
-            (lsp-request-async "dimfort/panelInfo" params callback
-                               :error-handler #'ignore)
-          (error (dimfort--panel-paint '("(DimFort server restarting...)") nil))))
-       (t (dimfort--panel-paint '("(DimFort LSP not attached)") nil))))))
+        (ignore-errors
+          (lsp-request-async method params callback :error-handler #'ignore)))
+       (t (dimfort--panel-paint
+           (list (dimfort--cell "(DimFort LSP not attached)")) nil))))))
+
+(defun dimfort--diag-to-lsp (d)
+  "Convert a panelInfo PanelDiagnostic D to an LSP Diagnostic plist.
+
+The panel reconstructs the code-action request context from the cursor
+line's diagnostics (the server keys the H010 extract action off them),
+matching what VSCode's executeCodeActionProvider supplies automatically.
+PanelDiagnostic spans are 1-based; LSP ranges are 0-based."
+  (let ((line (or (dimfort--field d "line") 1))
+        (col (or (dimfort--field d "column") 1))
+        (eline (or (dimfort--field d "endLine") (dimfort--field d "line") 1))
+        (ecol (or (dimfort--field d "endColumn") (dimfort--field d "column") 1))
+        (sev (or (dimfort--field d "severity") "info")))
+    (list :range (list :start (list :line (1- line) :character (1- col))
+                       :end (list :line (1- eline) :character (1- ecol)))
+          :severity (cond ((equal sev "error") 1) ((equal sev "warning") 2)
+                          ((equal sev "info") 3) (t 4))
+          :code (or (dimfort--field d "code") "")
+          :message (or (dimfort--field d "message") ""))))
+
+(defun dimfort--dimfort-action-p (action)
+  "Non-nil when ACTION is one of DimFort's own code actions."
+  (let* ((title (or (dimfort--field action "title") ""))
+         (cmd (dimfort--field action "command"))
+         (name (cond ((stringp cmd) cmd)
+                     (cmd (dimfort--field cmd "command")) (t ""))))
+    (or (string-prefix-p "dimfort." (or name ""))
+        (string-match-p "[Uu]nit\\|PARAMETER" title))))
 
 (defun dimfort--panel-refresh ()
-  "Re-request panel info for the current source buffer and repaint."
+  "Re-request panel info for the current source buffer and repaint.
+
+Fires `dimfort/panelInfo' first; on its result also fires
+`dimfort/interactions' and `textDocument/codeAction' (their results
+populate the Interactions and Actions sections). Each response repaints."
   (setq dimfort--panel-timer nil)
   (when (dimfort--panel-window)
     (let ((buf dimfort--panel-source-buffer))
@@ -820,13 +1065,41 @@ raise \"Process EGLOT ... not running\"."
           (let ((params (dimfort--panel-position-params buf))
                 (req (cl-incf dimfort--panel-req-counter)))
             (dimfort--panel-paint (dimfort--panel-render dimfort--panel-last-payload) t)
-            (dimfort--panel-request
-             buf params
+            (dimfort--panel-rpc
+             buf "dimfort/panelInfo" params
              (lambda (result)
                (when (= req dimfort--panel-req-counter)
                  (setq dimfort--panel-last-payload result)
-                 (dimfort--panel-paint (dimfort--panel-render result) nil)))))
-        (dimfort--panel-paint '("(no Fortran buffer)") nil)))))
+                 (dimfort--panel-paint (dimfort--panel-render result) nil)
+                 ;; Code-action context = the cursor line's diagnostics, so
+                 ;; the H010 extract action is offered.
+                 (let* ((diags (dimfort--seq (dimfort--field result "diagnostics")))
+                        (ctx-diags (apply #'vector
+                                          (mapcar #'dimfort--diag-to-lsp diags)))
+                        (ca-params
+                         (list :textDocument (plist-get params :textDocument)
+                               :range (list :start (plist-get params :position)
+                                            :end (plist-get params :position))
+                               :context (list :diagnostics ctx-diags))))
+                   (dimfort--panel-rpc
+                    buf "textDocument/codeAction" ca-params
+                    (lambda (actions)
+                      (when (= req dimfort--panel-req-counter)
+                        (setq dimfort--panel-last-actions
+                              (apply #'vector
+                                     (cl-remove-if-not #'dimfort--dimfort-action-p
+                                                       (dimfort--seq actions))))
+                        (dimfort--panel-paint
+                         (dimfort--panel-render dimfort--panel-last-payload) nil)))))))
+             )
+            (dimfort--panel-rpc
+             buf "dimfort/interactions" params
+             (lambda (rep)
+               (when (= req dimfort--panel-req-counter)
+                 (setq dimfort--panel-last-interactions rep)
+                 (dimfort--panel-paint
+                  (dimfort--panel-render dimfort--panel-last-payload) nil)))))
+        (dimfort--panel-paint (list (dimfort--cell "(no Fortran buffer)")) nil)))))
 
 (defun dimfort--panel-maybe-schedule ()
   "On `post-command-hook': debounce a refresh when in a managed Fortran buffer."
@@ -867,6 +1140,18 @@ raise \"Process EGLOT ... not running\"."
   (if (dimfort--panel-window)
       (dimfort-panel-close)
     (dimfort-panel-open)))
+
+;;;###autoload
+(defun dimfort-panel-filter (query)
+  "Filter the panel's Scope section to variables matching QUERY (name/unit).
+
+Called interactively, prompts for the query; an empty string clears the
+filter. Client-side — repaints from the cached payload, no LSP round-trip."
+  (interactive (list (read-string "Filter Scope (name/unit, empty to clear): "
+                                   dimfort--panel-filter)))
+  (setq dimfort--panel-filter (or query ""))
+  (when (dimfort--panel-window)
+    (dimfort--panel-paint (dimfort--panel-render dimfort--panel-last-payload) nil)))
 
 (defun dimfort--panel-maybe-autoopen ()
   "Open the panel on attach when `dimfort-panel-enabled' is non-nil."

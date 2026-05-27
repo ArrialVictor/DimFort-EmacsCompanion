@@ -10,6 +10,28 @@ defaults, packaging).
 
 ## [Unreleased]
 
+### Added
+
+- **Side panel — full feature parity with the VSCode companion.** The
+  panel previously showed only the Expression and Scope sections; it now
+  carries the three middle sections too (shown in the `both` layout):
+  - **Diagnostics** — the cursor line's DimFort diagnostics, with the
+    🔴/🟡/🔵 severity-circle vocabulary (info-level diagnostics such as
+    P001 unparsed regions read the same as the rest).
+  - **Interactions** — cross-site unit constraints for the symbol under
+    the cursor (`dimfort/interactions`): the X001 conflict, if any, then
+    the Declaration / Write / Read / Undetermined-read groups, each site
+    showing its location, unit, and source snippet.
+  - **Actions** — code actions available at the cursor (Add `@unit{}` /
+    extract literal to a PARAMETER), applied in place with `RET`. The
+    `textDocument/codeAction` request carries the cursor line's
+    diagnostics in its context so the H010 extract action is offered.
+  - **Scope filter** — `M-x dimfort-panel-filter` narrows the Scope
+    section to variables whose name or unit matches a query.
+  - **Row navigation** — `RET` (or `mouse-1`) on a declaration,
+    diagnostic, or interaction-site row jumps to it (cross-file for
+    sites); a file-wide diagnostic-count footer pins the bottom.
+
 ### Changed
 
 - **Hover settings collapsed into one `dimfort-hover`** option

@@ -253,3 +253,34 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 - [ ] **Cursor-follow** — move point between line 10 (function) and line 19
       (subroutine); the Scope section switches between `Function:
       dynamic_pressure` and `Subroutine: checks` accordingly.
+
+### Panel — Diagnostics / Interactions / Actions (the `both` layout)
+
+These three sections sit between Expression and Scope. Each is always
+present, showing `(none)` when nothing applies, so they don't pop in and
+out as point moves.
+
+- [ ] **Diagnostics** — point on line 19 (`bogus = c_sound * t`); the
+      Diagnostics section shows **🔴 H001: …**. On line 17 (`t_celsius`) it
+      shows **🟡 U005: …**. On a clean line (18) it shows `(none)`. `RET`
+      on a diagnostic row jumps to that span.
+- [ ] **Interactions** — point on a `c_sound` use (line 18). The
+      Interactions section shows the symbol `c_sound`, then the
+      **Declaration** group (line 2) and **Read** group (its use sites),
+      each row `file:line   unit` with the snippet beneath. `RET` on a site
+      jumps there (cross-file when the site is elsewhere). Because
+      `c_sound` is read as `m/s` at lines 18/21 but `kg/s` at line 19, a
+      **🔴 X001** conflict row sits at the top.
+- [ ] **Actions** — point on `t_celsius` (line 17) → the Actions section
+      lists **• Add @unit{} to t_celsius**; `RET` on it inserts `!< @unit{}`
+      with point between the braces. Point anywhere on line 20 (the H010
+      line) → **• Extract literal '273.15' into a named PARAMETER (s)**;
+      `RET` prompts for a name and applies the refactor.
+- [ ] **Footer** — the panel's last line reads `File: 🔴 N   🟡 N`.
+
+### Panel — Scope filter
+
+- [ ] `M-x dimfort-panel-filter RET Pa RET` → the Scope section keeps only
+      variables whose name or unit matches `Pa` (e.g. `ref_pressure`, `q`),
+      with a `Filter: "Pa"` header; scopes with no surviving variables are
+      hidden. `M-x dimfort-panel-filter RET RET` (empty) clears it.
