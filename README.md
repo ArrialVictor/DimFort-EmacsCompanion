@@ -115,8 +115,8 @@ layout):
   list to variables whose name or unit matches.
 - **Imports** — variables and procedures a `use` clause brings into scope
   (usable here but declared elsewhere), grouped by source module under a
-  `from <module>` header (functions show their return unit and read as
-  `name()`). Rows navigate cross-file to where the imported symbol — and
+  `from <module>` header (functions read as `name(argunits)`, showing
+  their argument + return units, e.g. `force(kg)`). Rows navigate cross-file to where the imported symbol — and
   its `@unit{}` — is declared. `M-x dimfort-panel-filter` narrows this too.
 
 Press `RET` (or `mouse-1`) on any declaration, diagnostic,

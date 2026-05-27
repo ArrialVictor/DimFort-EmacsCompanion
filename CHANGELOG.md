@@ -36,8 +36,8 @@ defaults, packaging).
     section to variables whose name or unit matches a query.
   - **Imports** — variables **and procedures** a `use` clause brings into
     scope (usable here but declared elsewhere), grouped by source module
-    under a `from <module>` header (functions show their return unit and
-    read as `name()`). `RET` navigates cross-file to where the imported
+    under a `from <module>` header (functions read as `name(argunits)`,
+    showing their argument + return units, e.g. `force(kg)`). `RET` navigates cross-file to where the imported
     symbol — and its `@unit{}` — is declared. The Scope filter
     (`dimfort-panel-filter`) narrows this section too. Driven by the
     server's `panelInfo.imports`.

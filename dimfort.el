@@ -858,9 +858,12 @@ Each variable row carries a jump target to its declaration line."
        as))))
 
 (defun dimfort--import-label (im)
-  "Display name for import IM — a callable reads as \"name()\"."
+  "Display name for import IM — a callable reads as name + its signature
+\(the parenthesised argument units, e.g. \"force(kg, m)\")."
   (let ((n (or (dimfort--field im "name") "?")))
-    (if (eq (dimfort--field im "callable") t) (concat n "()") n)))
+    (if (eq (dimfort--field im "callable") t)
+        (concat n (or (dimfort--field im "signature") "()"))
+      n)))
 
 (defun dimfort--import-matches (im query)
   "Non-nil when import IM's name, unit, or module contains QUERY."
