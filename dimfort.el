@@ -1090,8 +1090,7 @@ populate the Interactions and Actions sections). Each response repaints."
                                      (cl-remove-if-not #'dimfort--dimfort-action-p
                                                        (dimfort--seq actions))))
                         (dimfort--panel-paint
-                         (dimfort--panel-render dimfort--panel-last-payload) nil)))))))
-             )
+                         (dimfort--panel-render dimfort--panel-last-payload) nil))))))))
             (dimfort--panel-rpc
              buf "dimfort/interactions" params
              (lambda (rep)
