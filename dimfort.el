@@ -899,7 +899,12 @@ navigates cross-file to the declaration.  The shared Scope filter
               (setq unit-w (max unit-w
                                 (string-width (or (dimfort--field im "unit") "(none)")))))
             (dolist (im items)
-              (let* ((unit (or (dimfort--field im "unit") "(none)"))
+              ;; A subroutine (callable, no unit, not a missing annotation)
+              ;; reads as "—" rather than "(none)" — it has no return value.
+              (let* ((unit (or (dimfort--field im "unit")
+                               (if (and (eq (dimfort--field im "callable") t)
+                                        (equal (dimfort--field im "kind") "annotated"))
+                                   "—" "(none)")))
                      (tail (if (equal (dimfort--field im "kind") "unannotated")
                                " 🟡" " 🟢"))
                      (target (list :file (dimfort--field im "file")
