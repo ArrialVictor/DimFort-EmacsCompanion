@@ -34,9 +34,14 @@ defaults, packaging).
     diagnostics in its context so the H010 extract action is offered.
   - **Scope filter** — `M-x dimfort-panel-filter` narrows the Scope
     section to variables whose name or unit matches a query.
+  - **Imports** — variables a `use` clause brings into scope (usable here
+    but declared elsewhere), grouped by source module, each with its unit.
+    `RET` navigates cross-file to where the imported variable — and its
+    `@unit{}` — is declared. Driven by the server's `panelInfo.imports`.
   - **Row navigation** — `RET` (or `mouse-1`) on a declaration,
-    diagnostic, or interaction-site row jumps to it (cross-file for
-    sites); a file-wide diagnostic-count footer pins the bottom.
+    diagnostic, interaction-site, or import row jumps to it (cross-file
+    for sites and imports); a file-wide diagnostic-count footer pins the
+    bottom.
 
 ### Changed
 

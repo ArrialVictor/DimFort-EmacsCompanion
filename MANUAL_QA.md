@@ -312,3 +312,37 @@ end module scale_qa
       **S001** and `t_k = t_c` → **S002** (yellow), the panel circles 🟡.
 - [ ] **Off / Auto** — cycle again to `off` (forced clean even if a toml
       enabled it), once more to `auto` (back to deferring to the toml).
+
+## Imports section
+
+Save this `imports_qa.f90` and open it (one file, two modules — the
+second `use`s the first):
+
+```fortran
+module phys_constants
+  real :: play   !< @unit{Pa}
+  real :: grav   !< @unit{m/s^2}
+end module phys_constants
+
+module solver
+  use phys_constants, only: play
+  real :: local_p   !< @unit{Pa}
+contains
+  subroutine step()
+    local_p = play
+  end subroutine step
+end module solver
+```
+
+- [ ] **Lists the import** — point on `local_p = play` (line 11): the
+      **Imports** section shows a `use phys_constants` header with one row,
+      `play  kg/(m×s²) 🟢`.
+- [ ] **Cross-file navigation** — `RET` on the `play` row jumps to its
+      declaration in `phys_constants` (line 2; same file here, the source
+      module's file in a real project).
+- [ ] **Scoped + shadowed** — `grav` is **not** listed (the `only:` list
+      excludes it). Add `real :: play !< @unit{Pa}` as a local in `step`
+      and `play` drops from Imports (the local shadows it; it shows under
+      Scope instead).
+- [ ] **Empty case** — point in `phys_constants` (imports nothing): the
+      Imports section shows `(none)`.

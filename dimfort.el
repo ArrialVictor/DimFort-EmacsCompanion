@@ -857,6 +857,39 @@ Each variable row carries a jump target to its declaration line."
            (dimfort--cell (concat "  • " title) (list :action a))))
        as))))
 
+(defun dimfort--panel-render-imports (imports)
+  "Return Imports section cells, grouped by source module.
+Each row navigates (cross-file) to the imported variable's declaration."
+  (let ((ims (dimfort--seq imports)))
+    (if (null ims)
+        (list (dimfort--cell "  (none)"))
+      (let ((order '()) (groups (make-hash-table :test #'equal)) (rows '()))
+        (dolist (im ims)
+          (let ((m (or (dimfort--field im "module") "?")))
+            (unless (gethash m groups) (push m order))
+            (puthash m (cons im (gethash m groups)) groups)))
+        (dolist (m (nreverse order))
+          (push (dimfort--cell (concat "  use " m)) rows)
+          (let ((items (nreverse (gethash m groups))) (name-w 4) (unit-w 4))
+            (dolist (im items)
+              (setq name-w (max name-w (string-width (or (dimfort--field im "name") "?"))))
+              (setq unit-w (max unit-w
+                                (string-width (or (dimfort--field im "unit") "(none)")))))
+            (dolist (im items)
+              (let* ((unit (or (dimfort--field im "unit") "(none)"))
+                     (tail (if (equal (dimfort--field im "kind") "unannotated")
+                               " 🟡" " 🟢"))
+                     (target (list :file (dimfort--field im "file")
+                                   :line (dimfort--field im "line")
+                                   :column (dimfort--field im "column"))))
+                (push (dimfort--cell
+                       (concat "      "
+                               (dimfort--pad (or (dimfort--field im "name") "?") name-w)
+                               "  " (dimfort--pad unit unit-w) tail)
+                       target)
+                      rows)))))
+        (nreverse rows)))))
+
 (defun dimfort--panel-render (payload)
   "Return the full list of panel cells for PAYLOAD."
   (let ((rows '()))
@@ -879,7 +912,10 @@ Each variable row carries a jump target to its declaration line."
              (dimfort--panel-render-actions dimfort--panel-last-actions))
         (add (dimfort--cell dimfort--panel-divider) (dimfort--cell "")))
       (when (memq dimfort-panel-layout '(both routine))
-        (sec "Scope" (dimfort--panel-render-scope-section payload)))
+        (sec "Scope" (dimfort--panel-render-scope-section payload))
+        (sec "Imports"
+             (dimfort--panel-render-imports
+              (and payload (dimfort--field payload "imports")))))
       ;; Footer: whole-file diagnostic counts.
       (when (and (eq dimfort-panel-layout 'both) payload
                  (dimfort--field payload "fileDiagnosticCounts"))
