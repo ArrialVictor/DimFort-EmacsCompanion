@@ -34,7 +34,7 @@ contains
     real :: d          !< @unit{m}
     real :: bogus      !< @unit{kg}
     real :: t_celsius                  ! no annotation -> U005
-    d         = c_sound * t            ! OK:   m = (m/s)*s
+    d         = c_sound * t            ! OK:   m = (m·s⁻¹)*s
     bogus     = c_sound * t            ! H001: kg = m  (mismatch)
     t_celsius = t - 273.15             ! H010: bare 273.15 literal
     ref_pressure = dynamic_pressure(0.5 * c_sound)
@@ -67,6 +67,7 @@ to finish, then walk the sections below.
         go-to-definition  : on
         hover             : short
         cache             : read-write
+        scale checking    : auto
         cache dir         : (default)
         max workset size  : 40
         external modules  : (none)
@@ -107,7 +108,7 @@ window with `M-x eldoc-doc-buffer`).
 
       ```
       🟢 DimFort
-      c_sound : m/s
+      c_sound : m·s⁻¹
       ```
 
       and on the product `c_sound * t` (line 18), one compact line:
@@ -123,7 +124,7 @@ window with `M-x eldoc-doc-buffer`).
       ```
       🟢 DimFort
       c_sound * t : m
-        🟢  c_sound : m/s
+        🟢  c_sound : m·s⁻¹
         🟢  t       : s
       ```
 
@@ -134,12 +135,12 @@ window with `M-x eldoc-doc-buffer`).
       ```
       🟢 DimFort
       dynamic_pressure : Pa
-        🟢  v : m/s   ◂   0.5 * c_sound : m/s
+        🟢  v : m·s⁻¹   ◂   0.5 * c_sound : m·s⁻¹
               0.5     : 1
-              c_sound : m/s
+              c_sound : m·s⁻¹
       ```
 
-      (On Short the same call shows just the `v : m/s ◂ 0.5 * c_sound : m/s`
+      (On Short the same call shows just the `v : m·s⁻¹ ◂ 0.5 * c_sound : m·s⁻¹`
       row, no sub-tree.)
 
 - [ ] **Subroutine call** — still in `detailed`, hover the call name
@@ -152,7 +153,7 @@ window with `M-x eldoc-doc-buffer`).
 
 ## Inlay hints
 
-- [ ] `M-x dimfort-toggle-inlay-hints` → `[m/s]`-style ghost text appears
+- [ ] `M-x dimfort-toggle-inlay-hints` → `[m·s⁻¹]`-style ghost text appears
       after variable uses. Run it again → the ghost text disappears.
 
 ## Code actions
@@ -170,7 +171,11 @@ window with `M-x eldoc-doc-buffer`).
 - [ ] `M-.` (`xref-find-definitions`) on a `c_sound` use → jumps to its
       declaration on line 2.
 - [ ] Type a new `!< @unit{` and invoke completion (`C-M-i`) → unit names
-      are offered.
+      are offered. **Tip — if your terminal sends a literal `9;6u`** when
+      you press `C-M-i` (the CSI u keyboard protocol that terminal Emacs
+      doesn't decode), use **`ESC TAB`** instead — the universal substitute
+      for `C-M-i` (`ESC` is Meta, `TAB` is `C-i`). GUI Emacs avoids the
+      whole issue.
 
 ## Side panel
 
@@ -184,11 +189,11 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       ```
       Expression
 
-      bogus = c_sound * t        🔴
-      ├── bogus           : kg   🟢
-      └── c_sound * t     : m    🟢 (R4.2)
-          ├── c_sound     : m/s  🟢
-          └── t           : s    🟢
+      bogus = c_sound * t      🔴
+      ├── bogus       : kg     🟢
+      └── c_sound * t : m      🟢 (R4.2)
+          ├── c_sound : m·s⁻¹  🟢
+          └── t       : s      🟢
       ```
 
 - [ ] **Multiplication chain** — point on the **`=`** in line 10
@@ -196,15 +201,15 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       its rule:
 
       ```
-      q = 0.5 * rho * v * v              🟢
-      ├── q                 : kg/(m×s²)  🟢
-      └── 0.5 * rho * v * v : kg/(m×s²)  🟢 (R4.2)
-          ├── 0.5 * rho * v : kg/(m²×s)  🟢 (R4.2)
-          │   ├── 0.5 * rho : kg/m³      🟢 (R4.2)
-          │   │   ├── 0.5   : 1          🟢
-          │   │   └── rho   : kg/m³      🟢
-          │   └── v         : m/s        🟢
-          └── v             : m/s        🟢
+      q = 0.5 * rho * v * v               🟢
+      ├── q                 : kg·m⁻¹·s⁻²  🟢
+      └── 0.5 * rho * v * v : kg·m⁻¹·s⁻²  🟢 (R4.2)
+          ├── 0.5 * rho * v : kg·m⁻²·s⁻¹  🟢 (R4.2)
+          │   ├── 0.5 * rho : kg·m⁻³      🟢 (R4.2)
+          │   │   ├── 0.5   : 1           🟢
+          │   │   └── rho   : kg·m⁻³      🟢
+          │   └── v         : m·s⁻¹       🟢
+          └── v             : m·s⁻¹       🟢
       ```
 
 - [ ] **Function call with arguments** — point on the call name
@@ -212,10 +217,10 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       and the computed argument breaks down beneath it:
 
       ```
-      dynamic_pressure(0.5 * c_sound) : kg/(m×s²)  🟢
-      └── 0.5 * c_sound               : m/s        🟢 (R4.2)
-          ├── 0.5                     : 1          🟢
-          └── c_sound                 : m/s        🟢
+      dynamic_pressure(0.5 * c_sound) : kg·m⁻¹·s⁻²  🟢
+      └── 0.5 * c_sound               : m·s⁻¹       🟢 (R4.2)
+          ├── 0.5                     : 1           🟢
+          └── c_sound                 : m·s⁻¹       🟢
       ```
 
 - [ ] **Subroutine call** — point on the call name `scale_pressure` in
@@ -224,9 +229,9 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 
       ```
       call scale_pressure(2.0 * ref_pressure)              🟡
-      └── 2.0 * ref_pressure                  : kg/(m×s²)  🟢 (R4.2)
-          ├── 2.0                             : 1          🟢
-          └── ref_pressure                    : kg/(m×s²)  🟢
+      └── 2.0 * ref_pressure                  : kg·m⁻¹·s⁻²  🟢 (R4.2)
+          ├── 2.0                             : 1           🟢
+          └── ref_pressure                    : kg·m⁻¹·s⁻²  🟢
       ```
 
 - [ ] **Stacked scopes** — with point in line 10 (inside the function),
@@ -236,14 +241,14 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       ```
       Module: qa_mod
 
-        2     c_sound       m/s  🟢
-        3     ref_pressure  Pa   🟢
+        2     c_sound       m·s⁻¹ 🟢
+        3     ref_pressure  Pa    🟢
 
         Function: dynamic_pressure
 
-          6     v     m/s    🟢
-          7     q     Pa     🟢
-          8     rho   kg/m^3 🟢
+          6     v    m·s⁻¹  🟢
+          7     q    Pa     🟢
+          8     rho  kg/m^3 🟢
       ```
 
 - [ ] **Markers** — in `checks` (e.g. point in line 19), `t_celsius` shows
@@ -253,3 +258,106 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 - [ ] **Cursor-follow** — move point between line 10 (function) and line 19
       (subroutine); the Scope section switches between `Function:
       dynamic_pressure` and `Subroutine: checks` accordingly.
+
+### Panel — Diagnostics / Interactions / Actions (the `both` layout)
+
+These three sections sit between Expression and Scope. Each is always
+present, showing `(none)` when nothing applies, so they don't pop in and
+out as point moves.
+
+- [ ] **Diagnostics** — point on line 19 (`bogus = c_sound * t`); the
+      Diagnostics section shows **🔴 H001: …**. On line 17 (`t_celsius`) it
+      shows **🟡 U005: …**. On a clean line (18) it shows `(none)`. `RET`
+      on a diagnostic row jumps to that span.
+- [ ] **Interactions** — point on a `c_sound` use (line 18). The
+      Interactions section shows the symbol `c_sound`, then the
+      **Declaration** group (line 2) and **Read** group (its use sites),
+      each row `file:line   unit` with the snippet beneath. `RET` on a site
+      jumps there (cross-file when the site is elsewhere). Because
+      `c_sound` is read as `m·s⁻¹` at lines 18/21 but `kg/s` at line 19, a
+      **🔴 X001** conflict row sits at the top.
+- [ ] **Actions** — point on `t_celsius` (line 17) → the Actions section
+      lists **• Add @unit{} to t_celsius**; `RET` on it inserts `!< @unit{}`
+      with point between the braces. Point anywhere on line 20 (the H010
+      line) → **• Extract literal '273.15' into a named PARAMETER (s)**;
+      `RET` prompts for a name and applies the refactor.
+- [ ] **Footer** — the panel's last line reads `File: 🔴 N   🟡 N`.
+
+### Panel — Scope filter
+
+- [ ] `M-x dimfort-scope-filter RET Pa RET` → the Scope section keeps only
+      variables whose name or unit matches `Pa` (e.g. `ref_pressure`, `q`),
+      with a `Filter: "Pa"` header; scopes with no surviving variables are
+      hidden. `M-x dimfort-scope-filter RET RET` (empty) clears it.
+
+## Scale checking (S001 / S002)
+
+Save this `scale_qa.f90` and open it (no `.dimfort.toml` needed — the
+editor toggle drives it):
+
+```fortran
+module scale_qa
+  real :: play   !< @unit{Pa}
+  real :: phpa   !< @unit{hPa}
+  real :: t_k    !< @unit{K}
+  real :: t_c    !< @unit{degC}
+contains
+  subroutine s()
+    phpa = play        ! S001: hPa vs Pa (×100 multiplicative scale)
+    t_k  = t_c         ! S002: K vs degC (affine offset)
+  end subroutine s
+end module scale_qa
+```
+
+- [ ] **Auto (default)** — with `dimfort-scale-mode` = `"auto"` and no
+      `.dimfort.toml`, the file is **clean** (no S001/S002).
+- [ ] **On** — `M-x dimfort-cycle-scale` until the echo area says
+      `scale checking -> on` (the server restarts): `phpa = play` →
+      **S001** and `t_k = t_c` → **S002** (yellow), the panel circles 🟡.
+- [ ] **Off / Auto** — cycle again to `off` (forced clean even if a toml
+      enabled it), once more to `auto` (back to deferring to the toml).
+
+## Imports section
+
+Save this `imports_qa.f90` and open it (one file, two modules — the
+second `use`s the first):
+
+```fortran
+module phys_constants
+  real :: play   !< @unit{Pa}
+  real :: grav   !< @unit{m·s⁻¹^2}
+contains
+  function gravity_at(h) result(g)
+    real, intent(in) :: h   !< @unit{m}
+    real             :: g   !< @unit{m·s⁻¹^2}
+    g = grav
+  end function gravity_at
+end module phys_constants
+
+module solver
+  use phys_constants, only: play, gravity_at
+  real :: local_p   !< @unit{Pa}
+contains
+  subroutine step()
+    local_p = play
+  end subroutine step
+end module solver
+```
+
+- [ ] **Lists vars + procedures** — point on `local_p = play` (inside
+      `step`): the **Imports** section shows a `from phys_constants` header
+      with two indented rows — `play  kg·m⁻¹·s⁻² 🟢` and
+      `gravity_at(m)  m·s⁻² 🟢` (its `(m)` argument unit in the parens, its
+      `m·s⁻²` return unit in the column).
+- [ ] **Cross-file navigation** — `RET` on `play` jumps to its declaration
+      (line 2); `RET` on `gravity_at(m)` jumps to the function definition
+      (line 5). Same file here; the source module's file in a real project.
+- [ ] **Scoped + shadowed** — `grav` is **not** listed (the `only:` list
+      excludes it). Add `real :: play !< @unit{Pa}` as a local in `step`
+      and `play` drops from Imports (the local shadows it; it shows under
+      Scope instead).
+- [ ] **Imports filter** — `M-x dimfort-imports-filter RET gravity RET`
+      narrows the Imports section to `gravity_at(m)`; `play` to `play`;
+      empty clears it. Independent of `dimfort-scope-filter` (Scope).
+- [ ] **Empty case** — point in `phys_constants` (imports nothing): the
+      Imports section shows `(none)`.
