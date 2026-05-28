@@ -701,8 +701,14 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
       (let* ((tree (plist-get e :tree))
              (tree-pad (make-string (- tree-w (string-width tree)) ?\s))
              (unit (plist-get e :unit))
+             ;; Dim absence-of-information glyphs ("?" / "-") so real
+             ;; units pop. Text properties propagate through concat.
+             (unit-styled (and unit
+                               (if (member unit '("?" "-"))
+                                   (dimfort--dim unit)
+                                 unit)))
              (mid (cond
-                   (unit (concat " : " unit
+                   (unit (concat " : " unit-styled
                                  (make-string (- unit-w (string-width unit)) ?\s)))
                    ((> unit-w 0) (make-string (+ 3 unit-w) ?\s))
                    (t ""))))
@@ -857,11 +863,19 @@ Each variable row carries a jump target to its declaration line."
                                     ":" (number-to-string (or line 0))))
                        (unit (and (not (equal kind "uses"))
                                   (dimfort--field p "unit")))
+                       ;; Dim absence-of-information glyphs so real
+                       ;; units pop, the same way Scope / Imports /
+                       ;; Expression do.
+                       (unit-styled (and unit
+                                         (if (member unit '("?" "-"))
+                                             (dimfort--dim unit)
+                                           unit)))
                        (target (list :file file :line line
                                      :column (dimfort--field p "column")))
                        (snippet (dimfort--field p "snippet")))
                   (push (dimfort--cell
-                         (concat "      " loc (if unit (concat "   " unit) ""))
+                         (concat "      " loc
+                                 (if unit (concat "   " unit-styled) ""))
                          target)
                         rows)
                   (when (and snippet (not (string-empty-p snippet)))
