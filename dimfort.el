@@ -745,11 +745,17 @@ Each variable row carries a jump target to its declaration line."
                  (line (or (dimfort--field v "line") 0))
                  (tail (cond ((equal kind "unannotated") " 🟡")
                              ((equal kind "error") " 🔴")
-                             (t " 🟢"))))
+                             (t " 🟢")))
+                 ;; Dim absence-of-information glyphs (`?` = unknown,
+                 ;; `-` = structural-no-unit) so real units pop visually.
+                 (unit-padded (dimfort--pad unit unit-w))
+                 (unit-cell (if (member unit '("?" "-"))
+                                (dimfort--dim unit-padded)
+                              unit-padded)))
             (push (dimfort--cell
                    (concat pad "  " (dimfort--pad (number-to-string line) 4)
                            "  " (dimfort--pad (or (dimfort--field v "name") "") name-w)
-                           "  " (dimfort--pad unit unit-w) tail)
+                           "  " unit-cell tail)
                    (list :line line))
                   rows)))))
     (nreverse rows)))
@@ -937,13 +943,18 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
                                    "-" "?")))
                      (tail (if (equal (dimfort--field im "kind") "unannotated")
                                " 🟡" " 🟢"))
+                     ;; Dim absence-of-information glyphs so real units pop.
+                     (unit-padded (dimfort--pad unit unit-w))
+                     (unit-cell (if (member unit '("?" "-"))
+                                    (dimfort--dim unit-padded)
+                                  unit-padded))
                      (target (list :file (dimfort--field im "file")
                                    :line (dimfort--field im "line")
                                    :column (dimfort--field im "column"))))
                 (push (dimfort--cell
                        (concat "      "
                                (dimfort--pad (dimfort--import-label im) name-w)
-                               "  " (dimfort--pad unit unit-w) tail)
+                               "  " unit-cell tail)
                        target)
                       rows)))))
         (append header (nreverse rows))))))
