@@ -129,25 +129,26 @@ window with `M-x eldoc-doc-buffer`).
       ```
 
       and the **call** `dynamic_pressure` (line 21) gains a sub-tree under
-      its computed argument (`0.5 * c_sound`) — the difference from Short,
-      which lists only the formal-vs-actual pairing:
+      its computed argument row (`0.5 * c_sound : m·s⁻¹ 🟢`) — the
+      difference from Short, which shows the dimensional-signature header
+      and the argument row only:
 
       ```
       🟢 DimFort
-      dynamic_pressure : Pa
-        🟢  v : m·s⁻¹   ◂   0.5 * c_sound : m·s⁻¹
-              0.5     : 1
-              c_sound : m·s⁻¹
+      dynamic_pressure: (m·s⁻¹) → kg·m⁻¹·s⁻²
+        0.5 * c_sound : m·s⁻¹  🟢
+          ├── 0.5     : 1       🟢
+          └── c_sound : m·s⁻¹   🟢
       ```
 
-      (On Short the same call shows just the `v : m·s⁻¹ ◂ 0.5 * c_sound : m·s⁻¹`
-      row, no sub-tree.)
+      (On Short the same call shows the header + the row
+      `0.5 * c_sound : m·s⁻¹ 🟢` only, no sub-tree.)
 
 - [ ] **Subroutine call** — still in `detailed`, hover the call name
-      `scale_pressure` (line 22). Same formal-vs-actual layout as a
-      function call, **but no return unit in the header** (subroutines
-      don't return): `p : Pa ◂ 2.0 * ref_pressure : Pa`, with the argument
-      sub-tree beneath.
+      `scale_pressure` (line 22). Same dimensional-signature layout as a
+      function call, **but no `→ ret` tail** (subroutines don't return):
+      header `scale_pressure: (kg·m⁻¹·s⁻²)` + argument row
+      `2.0 * ref_pressure : kg·m⁻¹·s⁻² 🟢` with the sub-tree beneath.
 
 - [ ] Cycle once more → back to `disabled`; hovers go silent again.
 
@@ -191,21 +192,23 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 
       bogus = c_sound * t      🔴
       ├── bogus       : kg     🟢
-      └── c_sound * t : m      🟢 (R4.2)
+      └── c_sound * t : m      🟢
           ├── c_sound : m·s⁻¹  🟢
           └── t       : s      🟢
       ```
 
+      (Rule IDs like `(R4.2)` are no longer rendered on tree rows.)
+
 - [ ] **Multiplication chain** — point on the **`=`** in line 10
-      (`q = 0.5 * rho * v * v`). The product nests, each step tagged with
-      its rule:
+      (`q = 0.5 * rho * v * v`). The product nests, every step 🟢, the
+      root resolving to `kg·m⁻¹·s⁻²`:
 
       ```
       q = 0.5 * rho * v * v               🟢
       ├── q                 : kg·m⁻¹·s⁻²  🟢
-      └── 0.5 * rho * v * v : kg·m⁻¹·s⁻²  🟢 (R4.2)
-          ├── 0.5 * rho * v : kg·m⁻²·s⁻¹  🟢 (R4.2)
-          │   ├── 0.5 * rho : kg·m⁻³      🟢 (R4.2)
+      └── 0.5 * rho * v * v : kg·m⁻¹·s⁻²  🟢
+          ├── 0.5 * rho * v : kg·m⁻²·s⁻¹  🟢
+          │   ├── 0.5 * rho : kg·m⁻³      🟢
           │   │   ├── 0.5   : 1           🟢
           │   │   └── rho   : kg·m⁻³      🟢
           │   └── v         : m·s⁻¹       🟢
@@ -218,7 +221,7 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 
       ```
       dynamic_pressure(0.5 * c_sound) : kg·m⁻¹·s⁻²  🟢
-      └── 0.5 * c_sound               : m·s⁻¹       🟢 (R4.2)
+      └── 0.5 * c_sound               : m·s⁻¹       🟢
           ├── 0.5                     : 1           🟢
           └── c_sound                 : m·s⁻¹       🟢
       ```
@@ -229,10 +232,16 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 
       ```
       call scale_pressure(2.0 * ref_pressure)              🟡
-      └── 2.0 * ref_pressure                  : kg·m⁻¹·s⁻²  🟢 (R4.2)
+      └── 2.0 * ref_pressure                  : kg·m⁻¹·s⁻²  🟢
           ├── 2.0                             : 1           🟢
           └── ref_pressure                    : kg·m⁻¹·s⁻²  🟢
       ```
+
+- [ ] **Call-arg expected on mismatch** — temporarily edit line 21 to
+      `ref_pressure = dynamic_pressure(c_sound * t)`. The Expression
+      tree's argument row now shows
+      `c_sound * t : m 🔴 (expected m·s⁻¹)`, surfacing the formal unit the
+      call-site demanded. Revert the edit when done.
 
 - [ ] **Stacked scopes** — with point in line 10 (inside the function),
       the Scope section stacks the module over the function, indented by
