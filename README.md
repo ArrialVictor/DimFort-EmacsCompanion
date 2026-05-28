@@ -84,7 +84,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `.dimfort.toml`. |
 | `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel. |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
-| `M-x dimfort-panel-filter`       | Filter the panel's Scope section by name/unit (empty clears). |
+| `M-x dimfort-scope-filter`       | Filter the panel's Scope section by name/unit (empty clears). |
 | `M-x dimfort-imports-filter`     | Filter the panel's Imports section by name/unit/module (empty clears). |
 
 ## Side panel
@@ -112,7 +112,7 @@ layout):
   outermost-first and indented by nesting (a module's declarations,
   then a contained subroutine's locals). Each variable is marked 🟢
   (annotated), 🟡 (unannotated), or 🔴 (unparseable annotation), so
-  annotation gaps stand out. `M-x dimfort-panel-filter` narrows the
+  annotation gaps stand out. `M-x dimfort-scope-filter` narrows the
   list to variables whose name or unit matches.
 - **Imports** — variables and procedures a `use` clause brings into scope
   (usable here but declared elsewhere), grouped by source module under a

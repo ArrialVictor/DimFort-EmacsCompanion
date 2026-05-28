@@ -23,16 +23,21 @@ defaults, packaging).
   carries the three middle sections too (shown in the `both` layout):
   - **Diagnostics** — the cursor line's DimFort diagnostics, with the
     🔴/🟡/🔵 severity-circle vocabulary (info-level diagnostics such as
-    P001 unparsed regions read the same as the rest).
+    P001 unparsed regions read the same as the rest). Each row is
+    severity-coloured with the theme-aware `error` / `warning` / `shadow`
+    faces, mirroring the Nvim and VSCode panels.
   - **Interactions** — cross-site unit constraints for the symbol under
     the cursor (`dimfort/interactions`): the X001 conflict, if any, then
     the Declaration / Write / Read / Undetermined-read groups, each site
-    showing its location, unit, and source snippet.
+    showing its location, unit, and source snippet (the snippet dimmed
+    with the `shadow` face). Empty-state placeholders (`(none)` /
+    `(no … match)`) across all sections are likewise dimmed, matching the
+    VSCode and Nvim panels.
   - **Actions** — code actions available at the cursor (Add `@unit{}` /
     extract literal to a PARAMETER), applied in place with `RET`. The
     `textDocument/codeAction` request carries the cursor line's
     diagnostics in its context so the H010 extract action is offered.
-  - **Scope filter** — `M-x dimfort-panel-filter` narrows the Scope
+  - **Scope filter** — `M-x dimfort-scope-filter` narrows the Scope
     section to variables whose name or unit matches a query.
   - **Imports** — variables **and procedures** a `use` clause brings into
     scope (usable here but declared elsewhere), grouped by source module

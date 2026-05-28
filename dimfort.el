@@ -620,7 +620,7 @@ with `dimfort-panel-toggle'."
 (defvar dimfort--panel-last-actions nil)
 (defvar dimfort--panel-source-buffer nil)
 (defvar dimfort--panel-req-counter 0)
-(defvar dimfort--panel-filter ""
+(defvar dimfort--scope-filter ""
   "Client-side name/unit filter for the Scope section (empty = no filter).")
 (defvar dimfort--imports-filter ""
   "Client-side name/unit/module filter for the Imports section.")
@@ -653,6 +653,12 @@ with `dimfort-panel-toggle'."
 (defun dimfort--cell (text &optional target)
   "Make a panel cell: display TEXT with an optional navigation TARGET."
   (cons text target))
+
+(defun dimfort--dim (text)
+  "Return TEXT propertized with the dimmed `shadow' face.
+Used for empty-state placeholders and interaction source snippets, to
+match the VSCode panel's muted styling."
+  (propertize text 'face 'shadow))
 
 (defun dimfort--base-name (path)
   "Return the last path component of PATH."
@@ -728,7 +734,7 @@ Each variable row carries a jump target to its declaration line."
           rows)
     (push (dimfort--cell "") rows)
     (if (null vs)
-        (push (dimfort--cell (concat pad "  (no declarations)")) rows)
+        (push (dimfort--cell (dimfort--dim (concat pad "  (no declarations)"))) rows)
       (let ((name-w 4) (unit-w 4))
         (dolist (v vs)
           (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
@@ -750,12 +756,12 @@ Each variable row carries a jump target to its declaration line."
 
 (defun dimfort--panel-render-scope-section (payload)
   "Return the Scope section cells for PAYLOAD, with the active filter applied."
-  (let* ((q (downcase (or dimfort--panel-filter "")))
+  (let* ((q (downcase (or dimfort--scope-filter "")))
          (rows '())
          (scopes (dimfort--seq (and payload (dimfort--field payload "scopes")))))
     (unless (string-empty-p q)
-      (push (dimfort--cell (format "Filter: \"%s\"  (dimfort-panel-filter to change)"
-                                   dimfort--panel-filter))
+      (push (dimfort--cell (format "Filter: \"%s\"  (dimfort-scope-filter to change)"
+                                   dimfort--scope-filter))
             rows)
       (push (dimfort--cell "") rows))
     (cond
@@ -774,7 +780,8 @@ Each variable row carries a jump target to its declaration line."
                      (setq shown t))))
         (when (and (not (string-empty-p q)) (not shown))
           (push (dimfort--cell
-                 (format "  (no variables match \"%s\")" dimfort--panel-filter))
+                 (dimfort--dim
+                  (format "  (no variables match \"%s\")" dimfort--scope-filter)))
                 rows))))
      (payload
       (setq rows (append (nreverse (dimfort--panel-render-scope
@@ -784,22 +791,29 @@ Each variable row carries a jump target to its declaration line."
                                         (dimfort--field payload "routineVars"))
                                     0))
                          rows)))
-     (t (push (dimfort--cell "Scope: (none)") rows)))
+     (t (push (dimfort--cell (dimfort--dim "Scope: (none)")) rows)))
     (nreverse rows)))
 
 (defun dimfort--panel-render-diagnostics (payload)
   "Return Diagnostics section cells (cursor-line diagnostics) for PAYLOAD."
   (let ((diags (dimfort--seq (and payload (dimfort--field payload "diagnostics")))))
     (if (null diags)
-        (list (dimfort--cell "  (none)"))
+        (list (dimfort--cell (dimfort--dim "  (none)")))
       (mapcar
        (lambda (d)
          (let* ((sev (or (dimfort--field d "severity") "info"))
                 (glyph (cond ((equal sev "error") "🔴")
                              ((equal sev "warning") "🟡") (t "🔵")))
+                ;; Colour the row by severity with theme-aware built-in faces,
+                ;; mirroring Nvim's DiagnosticError/Warn/Info groups and the
+                ;; VSCode editorError/Warning/Info colours.
+                (face (cond ((equal sev "error") 'error)
+                            ((equal sev "warning") 'warning)
+                            (t 'shadow)))
                 (code (or (dimfort--field d "code") "?"))
                 (msg (or (dimfort--field d "message") "")))
-           (dimfort--cell (concat "  " glyph " " code ": " msg)
+           (dimfort--cell (propertize (concat "  " glyph " " code ": " msg)
+                                      'face face)
                           (list :line (dimfort--field d "line")
                                 :column (dimfort--field d "column")))))
        diags))))
@@ -808,13 +822,15 @@ Each variable row carries a jump target to its declaration line."
   "Return Interactions section cells for the interactions report REP."
   (let ((points (dimfort--seq (and rep (dimfort--field rep "points")))))
     (if (null points)
-        (list (dimfort--cell "  (none)"))
+        (list (dimfort--cell (dimfort--dim "  (none)")))
       (let ((rows '()))
         (push (dimfort--cell (concat "  " (or (dimfort--field rep "symbol") "?"))) rows)
         (dolist (c (dimfort--seq (dimfort--field rep "conflicts")))
           (push (dimfort--cell
-                 (concat "  🔴 " (or (dimfort--field c "code") "?") ": "
-                         (or (dimfort--field c "message") ""))
+                 (propertize
+                  (concat "  🔴 " (or (dimfort--field c "code") "?") ": "
+                          (or (dimfort--field c "message") ""))
+                  'face 'error)
                  (list :file (dimfort--field c "file")
                        :line (dimfort--field c "line")
                        :column (dimfort--field c "column")))
@@ -827,7 +843,7 @@ Each variable row carries a jump target to its declaration line."
             (setq pts (nreverse pts))
             (push (dimfort--cell (concat "  " (cdr group))) rows)
             (if (null pts)
-                (push (dimfort--cell "      (none)") rows)
+                (push (dimfort--cell (dimfort--dim "      (none)")) rows)
               (dolist (p pts)
                 (let* ((file (dimfort--field p "file"))
                        (line (dimfort--field p "line"))
@@ -843,14 +859,14 @@ Each variable row carries a jump target to its declaration line."
                          target)
                         rows)
                   (when (and snippet (not (string-empty-p snippet)))
-                    (push (dimfort--cell (concat "        " snippet) target) rows)))))))
+                    (push (dimfort--cell (dimfort--dim (concat "        " snippet)) target) rows)))))))
         (nreverse rows)))))
 
 (defun dimfort--panel-render-actions (actions)
   "Return Actions section cells for the CodeAction list ACTIONS."
   (let ((as (dimfort--seq actions)))
     (if (null as)
-        (list (dimfort--cell "  (none)"))
+        (list (dimfort--cell (dimfort--dim "  (none)")))
       (mapcar
        (lambda (a)
          (let ((title (replace-regexp-in-string
@@ -895,8 +911,9 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
         (append header
                 (list (dimfort--cell
                        (if (and (not (string-empty-p q)) all)
-                           (format "  (no imports match \"%s\")" dimfort--imports-filter)
-                         "  (none)"))))
+                           (dimfort--dim
+                            (format "  (no imports match \"%s\")" dimfort--imports-filter))
+                         (dimfort--dim "  (none)")))))
       (let ((order '()) (groups (make-hash-table :test #'equal)) (rows '()))
         (dolist (im ims)
           (let ((m (or (dimfort--field im "module") "?")))
@@ -942,7 +959,7 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
         (let ((expr (and payload (dimfort--field payload "expression"))))
           (sec "Expression"
                (if expr (dimfort--panel-render-expr expr)
-                 (list (dimfort--cell "  (no expression at cursor)"))))))
+                 (list (dimfort--cell (dimfort--dim "  (none)")))))))
       (when (eq dimfort-panel-layout 'both)
         (sec "Diagnostics" (dimfort--panel-render-diagnostics payload))
         (sec "Interactions"
@@ -969,8 +986,17 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
 (defun dimfort--panel-paint (cells stale)
   "Write CELLS into the panel buffer; dim them when STALE.
 Each cell's navigation target (if any) is stamped on its line as the
-`dimfort-target' text property so RET can act on it."
-  (let ((buf (get-buffer dimfort--panel-buffer)))
+`dimfort-target' text property so RET can act on it.
+
+The panel window's scroll position (`window-start') and point
+(`window-point') are saved before the erase and restored after the
+insert (clamped to the new `point-max'), so a scrolled view survives
+the repaint that fires on every source-cursor move — otherwise the
+user can never see the bottom of the panel while editing."
+  (let* ((buf (get-buffer dimfort--panel-buffer))
+         (win (and buf (get-buffer-window buf 'visible)))
+         (saved-start (and win (window-start win)))
+         (saved-point (and win (window-point win))))
     (when (buffer-live-p buf)
       (with-current-buffer buf
         (let ((inhibit-read-only t))
@@ -983,7 +1009,11 @@ Each cell's navigation target (if any) is stamped on its line as the
               (when target
                 (put-text-property start (point) 'dimfort-target target))))
           (when stale
-            (add-text-properties (point-min) (point-max) '(face shadow))))))))
+            (add-text-properties (point-min) (point-max) '(face shadow))))
+        (when win
+          (let ((cap (point-max)))
+            (set-window-start win (min (or saved-start 1) cap))
+            (set-window-point win (min (or saved-point 1) cap))))))))
 
 ;; -- window lifecycle + LSP request --
 
@@ -997,7 +1027,17 @@ Each cell's navigation target (if any) is stamped on its line as the
 (define-derived-mode dimfort-panel-mode special-mode "DimFort-Panel"
   "Major mode for the DimFort side panel."
   (setq truncate-lines t)
-  (setq-local cursor-type nil))
+  (setq-local cursor-type nil)
+  ;; Smooth, line-by-line scrolling — better for a sidebar than half-page
+  ;; jumps, so the user can align a section header (Scope, Imports, ...)
+  ;; precisely at the top without it splitting across a page boundary.
+  ;; ``scroll-conservatively`` makes auto-scroll on point movement step a
+  ;; single line at a time; ``scroll-margin 0`` removes the enforced top/
+  ;; bottom margin so the alignment is exact. Mouse wheel and arrows then
+  ;; scroll continuously; C-v / M-v stay as standard page-scroll for big
+  ;; jumps. Same approach as treemacs/magit-status side buffers.
+  (setq-local scroll-margin 0
+              scroll-conservatively 101))
 
 (defun dimfort--panel-goto (target)
   "Jump to TARGET's (:file :line :column) in a non-panel window."
@@ -1238,14 +1278,14 @@ populate the Interactions and Actions sections). Each response repaints."
     (dimfort-panel-open)))
 
 ;;;###autoload
-(defun dimfort-panel-filter (query)
+(defun dimfort-scope-filter (query)
   "Filter the panel's Scope section to variables matching QUERY (name/unit).
 
 Called interactively, prompts for the query; an empty string clears the
 filter. Client-side — repaints from the cached payload, no LSP round-trip."
   (interactive (list (read-string "Filter Scope (name/unit, empty to clear): "
-                                   dimfort--panel-filter)))
-  (setq dimfort--panel-filter (or query ""))
+                                   dimfort--scope-filter)))
+  (setq dimfort--scope-filter (or query ""))
   (when (dimfort--panel-window)
     (dimfort--panel-paint (dimfort--panel-render dimfort--panel-last-payload) nil)))
 
@@ -1255,7 +1295,7 @@ filter. Client-side — repaints from the cached payload, no LSP round-trip."
 
 Matches against the imported name, its unit, and its source module. An
 empty string clears the filter.  Its own filter, independent of the
-Scope one (`dimfort-panel-filter')."
+Scope one (`dimfort-scope-filter')."
   (interactive (list (read-string "Filter Imports (name/unit/module, empty to clear): "
                                    dimfort--imports-filter)))
   (setq dimfort--imports-filter (or query ""))
