@@ -673,13 +673,13 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
            (next-prefix (cond (is-root prefix)
                               (is-last (concat prefix "    "))
                               (t (concat prefix "│   "))))
-           (rule-id (dimfort--field node "ruleId"))
+           (expected (dimfort--field node "expected"))
            (marker (dimfort--field node "marker"))
            (entry (list :tree (concat prefix connector
                                       (or (dimfort--field node "label") "?"))
                         :unit (dimfort--field node "unit")
                         :mark (or (cdr (assoc marker dimfort--panel-markers)) " ")
-                        :rule (if rule-id (format " (%s)" rule-id) "")))
+                        :extra (if expected (format " (expected %s)" expected) "")))
            (children (dimfort--seq (dimfort--field node "children")))
            (n (length children))
            (result (list entry)))
@@ -707,7 +707,7 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
                    ((> unit-w 0) (make-string (+ 3 unit-w) ?\s))
                    (t ""))))
         (push (dimfort--cell (concat tree tree-pad mid "  "
-                                     (plist-get e :mark) (plist-get e :rule)))
+                                     (plist-get e :mark) (plist-get e :extra)))
               rows)))
     (nreverse rows)))
 
