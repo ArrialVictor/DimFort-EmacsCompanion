@@ -159,7 +159,7 @@ window with `M-x eldoc-doc-buffer`).
 - [ ] **Subroutine call** — still in `detailed`, hover the call name
       `scale_pressure` (line 39). Same tree layout as a function call,
       **but the root has no return unit** so it reads
-      `call scale_pressure(…) : ? 🟡`. Argument row
+      `call scale_pressure(…) : -  🟢`. Argument row
       `2.0 * ref_pressure : kg·m⁻¹·s⁻² 🟢` with the sub-tree beneath.
 
 - [ ] **Intrinsics — same tree as user calls.** Still in `detailed`:
