@@ -607,7 +607,8 @@ with `dimfort-panel-toggle'."
 
 (defconst dimfort--panel-buffer "*dimfort-panel*")
 (defconst dimfort--panel-divider (make-string 60 ?─))
-(defconst dimfort--panel-markers '(("ok" . "🟢") ("warn" . "🟡") ("error" . "🔴")))
+(defconst dimfort--panel-markers
+  '(("ok" . "🟢") ("assumed" . "🔵") ("warn" . "🟡") ("error" . "🔴")))
 (defconst dimfort--panel-interaction-groups
   '(("declares" . "Declaration")
     ("contributes" . "Write")
@@ -674,12 +675,18 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
                               (is-last (concat prefix "    "))
                               (t (concat prefix "│   "))))
            (expected (dimfort--field node "expected"))
+           (assumed (dimfort--field node "assumed"))
            (marker (dimfort--field node "marker"))
+           ;; Row tail: `(expected …)' on mismatch, `(assumed: <reason>)'
+           ;; on @unit_assume rows. Both may apply; concatenate.
+           (extra (concat
+                    (if expected (format " (expected %s)" expected) "")
+                    (if assumed (format " (assumed: %s)" assumed) "")))
            (entry (list :tree (concat prefix connector
                                       (or (dimfort--field node "label") "?"))
                         :unit (dimfort--field node "unit")
                         :mark (or (cdr (assoc marker dimfort--panel-markers)) " ")
-                        :extra (if expected (format " (expected %s)" expected) "")))
+                        :extra extra))
            (children (dimfort--seq (dimfort--field node "children")))
            (n (length children))
            (result (list entry)))
