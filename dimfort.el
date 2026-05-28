@@ -738,9 +738,9 @@ Each variable row carries a jump target to its declaration line."
       (let ((name-w 4) (unit-w 4))
         (dolist (v vs)
           (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
-          (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "(none)")))))
+          (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "?")))))
         (dolist (v vs)
-          (let* ((unit (or (dimfort--field v "unit") "(none)"))
+          (let* ((unit (or (dimfort--field v "unit") "?"))
                  (kind (dimfort--field v "kind"))
                  (line (or (dimfort--field v "line") 0))
                  (tail (cond ((equal kind "unannotated") " 🟡")
@@ -925,14 +925,16 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
             (dolist (im items)
               (setq name-w (max name-w (string-width (dimfort--import-label im))))
               (setq unit-w (max unit-w
-                                (string-width (or (dimfort--field im "unit") "(none)")))))
+                                (string-width (or (dimfort--field im "unit") "?")))))
             (dolist (im items)
               ;; A subroutine (callable, no unit, not a missing annotation)
-              ;; reads as "—" rather than "(none)" — it has no return value.
+              ;; reads as "-" (structural-no-unit) rather than "?" — it
+              ;; has no return value to annotate. Unannotated declarations
+              ;; get "?" (unknown).
               (let* ((unit (or (dimfort--field im "unit")
                                (if (and (eq (dimfort--field im "callable") t)
                                         (equal (dimfort--field im "kind") "annotated"))
-                                   "—" "(none)")))
+                                   "-" "?")))
                      (tail (if (equal (dimfort--field im "kind") "unannotated")
                                " 🟡" " 🟢"))
                      (target (list :file (dimfort--field im "file")
