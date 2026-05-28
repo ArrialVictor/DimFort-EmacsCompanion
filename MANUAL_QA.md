@@ -128,26 +128,26 @@ window with `M-x eldoc-doc-buffer`).
         🟢  t       : s
       ```
 
-      and the **call** `dynamic_pressure` (line 21) gains a sub-tree under
-      its computed argument row (`0.5 * c_sound : m·s⁻¹ 🟢`) — the
-      difference from Short, which shows the dimensional-signature header
-      and the argument row only:
+      and the **call** `dynamic_pressure` (line 21) renders the same
+      tree shape as the side panel — root row with the return unit,
+      argument row, sub-tree below — the difference from Short is the
+      sub-tree:
 
       ```
       🟢 DimFort
-      dynamic_pressure: (m·s⁻¹) → kg·m⁻¹·s⁻²
-        0.5 * c_sound : m·s⁻¹  🟢
-          ├── 0.5     : 1       🟢
-          └── c_sound : m·s⁻¹   🟢
+      dynamic_pressure(0.5 * c_sound) : kg·m⁻¹·s⁻²  🟢
+      └── 0.5 * c_sound               : m·s⁻¹       🟢
+          ├── 0.5                     : 1           🟢
+          └── c_sound                 : m·s⁻¹       🟢
       ```
 
-      (On Short the same call shows the header + the row
-      `0.5 * c_sound : m·s⁻¹ 🟢` only, no sub-tree.)
+      (Short shows root + the `0.5 * c_sound` argument row only, no
+      sub-tree.)
 
 - [ ] **Subroutine call** — still in `detailed`, hover the call name
-      `scale_pressure` (line 22). Same dimensional-signature layout as a
-      function call, **but no `→ ret` tail** (subroutines don't return):
-      header `scale_pressure: (kg·m⁻¹·s⁻²)` + argument row
+      `scale_pressure` (line 22). Same tree layout as a function call,
+      **but the root has no return unit** so it reads
+      `call scale_pressure(…) : ? 🟡`. Argument row
       `2.0 * ref_pressure : kg·m⁻¹·s⁻² 🟢` with the sub-tree beneath.
 
 - [ ] Cycle once more → back to `disabled`; hovers go silent again.
