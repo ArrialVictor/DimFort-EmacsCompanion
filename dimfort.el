@@ -613,7 +613,7 @@ with `dimfort-panel-toggle'."
   '(("declares" . "Declaration")
     ("contributes" . "Write")
     ("requires" . "Read")
-    ("uses" . "Undetermined read"))
+    ("uses" . "Undetermined"))
   "Interaction-point kinds in display order, with their section labels.")
 (defvar dimfort--panel-timer nil)
 (defvar dimfort--panel-last-payload nil)
@@ -748,29 +748,51 @@ Each variable row carries a jump target to its declaration line."
     (push (dimfort--cell "") rows)
     (if (null vs)
         (push (dimfort--cell (dimfort--dim (concat pad "  (no declarations)"))) rows)
-      (let ((name-w 4) (unit-w 4))
+      (let ((name-w 4) (unit-w 4) (norm-w 0))
         (dolist (v vs)
           (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
-          (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "?")))))
-        (dolist (v vs)
-          (let* ((unit (or (dimfort--field v "unit") "?"))
-                 (kind (dimfort--field v "kind"))
-                 (line (or (dimfort--field v "line") 0))
-                 (tail (cond ((equal kind "unannotated") " 🟡")
-                             ((equal kind "error") " 🔴")
-                             (t " 🟢")))
-                 ;; Dim absence-of-information glyphs (`?` = unknown,
-                 ;; `-` = structural-no-unit) so real units pop visually.
-                 (unit-padded (dimfort--pad unit unit-w))
-                 (unit-cell (if (member unit '("?" "-"))
-                                (dimfort--dim unit-padded)
-                              unit-padded)))
-            (push (dimfort--cell
-                   (concat pad "  " (dimfort--pad (number-to-string line) 4)
-                           "  " (dimfort--pad (or (dimfort--field v "name") "") name-w)
-                           "  " unit-cell tail)
-                   (list :line line))
-                  rows)))))
+          (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "?"))))
+          ;; Normalized column: base-SI expansion (and, in scale mode,
+          ;; the scale factor — server already encodes the mode-aware
+          ;; rendering in ``unitNormalized``). Shown only on rows whose
+          ;; normalized form differs from the source unit; other rows
+          ;; pad-blank to keep markers aligned.
+          (let ((norm (dimfort--field v "unitNormalized"))
+                (src  (dimfort--field v "unit")))
+            (when (and norm (not (equal norm src)))
+              (setq norm-w (max norm-w (string-width norm))))))
+        ;; Two-space gap between source-unit and normalized columns
+        ;; matches the side-by-side ``<td>`` convention used by the
+        ;; VSCode panel — no arrow / separator glyph (column spacing
+        ;; already conveys the second cell).
+        (let ((norm-block-w (if (> norm-w 0) norm-w 0)))
+          (dolist (v vs)
+            (let* ((unit (or (dimfort--field v "unit") "?"))
+                   (kind (dimfort--field v "kind"))
+                   (line (or (dimfort--field v "line") 0))
+                   (tail (cond ((equal kind "unannotated") " 🟡")
+                               ((equal kind "error") " 🔴")
+                               (t " 🟢")))
+                   ;; Dim absence-of-information glyphs (`?` = unknown,
+                   ;; `-` = structural-no-unit) so real units pop visually.
+                   (unit-padded (dimfort--pad unit unit-w))
+                   (unit-cell (if (member unit '("?" "-"))
+                                  (dimfort--dim unit-padded)
+                                unit-padded))
+                   (norm (dimfort--field v "unitNormalized"))
+                   (norm-block
+                    (cond
+                     ((zerop norm-block-w) "")
+                     ((and norm (not (equal norm unit)))
+                      (concat "  " norm
+                              (make-string (- norm-w (string-width norm)) ?\s)))
+                     (t (concat "  " (make-string norm-block-w ?\s))))))
+              (push (dimfort--cell
+                     (concat pad "  " (dimfort--pad (number-to-string line) 4)
+                             "  " (dimfort--pad (or (dimfort--field v "name") "") name-w)
+                             "  " unit-cell norm-block tail)
+                     (list :line line))
+                    rows))))))
     (nreverse rows)))
 
 (defun dimfort--panel-render-scope-section (payload)
@@ -948,36 +970,50 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
             (puthash m (cons im (gethash m groups)) groups)))
         (dolist (m (nreverse order))
           (push (dimfort--cell (concat "  from " m)) rows)
-          (let ((items (nreverse (gethash m groups))) (name-w 4) (unit-w 4))
+          (let ((items (nreverse (gethash m groups)))
+                (name-w 4) (unit-w 4) (norm-w 0))
             (dolist (im items)
               (setq name-w (max name-w (string-width (dimfort--import-label im))))
               (setq unit-w (max unit-w
-                                (string-width (or (dimfort--field im "unit") "?")))))
-            (dolist (im items)
-              ;; A subroutine (callable, no unit, not a missing annotation)
-              ;; reads as "-" (structural-no-unit) rather than "?" — it
-              ;; has no return value to annotate. Unannotated declarations
-              ;; get "?" (unknown).
-              (let* ((unit (or (dimfort--field im "unit")
-                               (if (and (eq (dimfort--field im "callable") t)
-                                        (equal (dimfort--field im "kind") "annotated"))
-                                   "-" "?")))
-                     (tail (if (equal (dimfort--field im "kind") "unannotated")
-                               " 🟡" " 🟢"))
-                     ;; Dim absence-of-information glyphs so real units pop.
-                     (unit-padded (dimfort--pad unit unit-w))
-                     (unit-cell (if (member unit '("?" "-"))
-                                    (dimfort--dim unit-padded)
-                                  unit-padded))
-                     (target (list :file (dimfort--field im "file")
-                                   :line (dimfort--field im "line")
-                                   :column (dimfort--field im "column"))))
-                (push (dimfort--cell
-                       (concat "      "
-                               (dimfort--pad (dimfort--import-label im) name-w)
-                               "  " unit-cell tail)
-                       target)
-                      rows)))))
+                                (string-width (or (dimfort--field im "unit") "?"))))
+              (let ((norm (dimfort--field im "unitNormalized"))
+                    (src  (dimfort--field im "unit")))
+                (when (and norm (not (equal norm src)))
+                  (setq norm-w (max norm-w (string-width norm))))))
+            (let ((norm-block-w (if (> norm-w 0) norm-w 0)))
+              (dolist (im items)
+                ;; A subroutine (callable, no unit, not a missing
+                ;; annotation) reads as "-" (structural-no-unit) rather
+                ;; than "?" — it has no return value to annotate.
+                ;; Unannotated declarations get "?" (unknown).
+                (let* ((unit (or (dimfort--field im "unit")
+                                 (if (and (eq (dimfort--field im "callable") t)
+                                          (equal (dimfort--field im "kind") "annotated"))
+                                     "-" "?")))
+                       (tail (if (equal (dimfort--field im "kind") "unannotated")
+                                 " 🟡" " 🟢"))
+                       ;; Dim absence-of-information glyphs so real units pop.
+                       (unit-padded (dimfort--pad unit unit-w))
+                       (unit-cell (if (member unit '("?" "-"))
+                                      (dimfort--dim unit-padded)
+                                    unit-padded))
+                       (norm (dimfort--field im "unitNormalized"))
+                       (norm-block
+                        (cond
+                         ((zerop norm-block-w) "")
+                         ((and norm (not (equal norm unit)))
+                          (concat "  " norm
+                                  (make-string (- norm-w (string-width norm)) ?\s)))
+                         (t (concat "  " (make-string norm-block-w ?\s)))))
+                       (target (list :file (dimfort--field im "file")
+                                     :line (dimfort--field im "line")
+                                     :column (dimfort--field im "column"))))
+                  (push (dimfort--cell
+                         (concat "      "
+                                 (dimfort--pad (dimfort--import-label im) name-w)
+                                 "  " unit-cell norm-block tail)
+                         target)
+                        rows))))))
         (append header (nreverse rows))))))
 
 (defun dimfort--panel-render (payload)

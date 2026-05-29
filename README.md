@@ -104,7 +104,7 @@ layout):
   P001 unparsed regions read the same as the rest).
 - **Interactions** — cross-site unit constraints for the symbol under
   the cursor (the `dimfort interactions` query): the X001 conflict, if
-  any, then the Declaration / Write / Read / Undetermined-read groups,
+  any, then the Declaration / Write / Read / Undetermined groups,
   each site showing its location, unit, and source snippet.
 - **Actions** — the code actions available at the cursor (Add `@unit{}`
   / extract literal to a PARAMETER); press `RET` on one to apply it.
