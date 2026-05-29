@@ -8,6 +8,62 @@ behavioural changes mostly land in the DimFort server itself. Entries
 below cover client-side changes only (eglot/lsp-mode wiring, commands,
 defaults, packaging).
 
+## [Unreleased]
+
+### Polish: render `assumed` marker (🔵) + `(assumed: <reason>)` tail on the RHS row
+
+Tracks the new server-side `ExpressionNode.marker = "assumed"` value
+and `ExpressionNode.assumed: string | null` field. When the server
+flags a row as accepted via `@unit_assume{<unit> : <reason>}`, the
+panel paints 🔵 and appends `(assumed: <reason>)` to the row tail
+(same column as `(expected …)`; both can coexist).
+
+The overlay lives on the **RHS row** of the assignment — the
+directive's syntactic subject — not on the assignment row itself.
+The companion needs no code changes for this routing (the server
+sets `marker`/`assumed` on the RHS child of the assignment
+payload); this entry tracks the wire-format expectation.
+
+🔵 is a per-row overlay, NOT a severity tier — it doesn't
+propagate up. The assignment row stays `marker: "ok"` (🟢) when
+the homogeneity check passes; H001 still fires (🔴) if the
+declared LHS unit conflicts with the asserted RHS unit. See
+DimFort design/markers.md §4.6.
+
+### Polish: dim `?` and `-` glyphs across every panel section
+
+Absence-of-information glyphs (`?` for unknown, `-` for
+structural-no-unit) now render with the `shadow` face (via
+`dimfort--dim`) in **every** panel section that shows units —
+Scope, Imports, Expression tree, and Interactions. Three glyphs,
+three meanings, consistent visual treatment everywhere.
+
+### Change: scope / import unannotated vars render `?`, not `(none)`
+
+Aligns with the server-side glyph unification (see DimFort
+design/markers.md §4.5): `(none)` is now reserved for empty
+(sub-)section headers only (`Scope: (none)`, `Imports: (none)`).
+Individual unannotated variables in the Scope and Imports sections
+read `?` — the same glyph used inside the Expression tree for
+unknown units. Imported subroutines (no return by design) read `-`
+instead of `?` to distinguish "no unit by structure" from "we
+don't know yet". (The Imports row previously used `—`; that becomes
+`-` for the same reason — a single glyph across companions and
+surfaces.)
+
+### Change: panel tree drops rule IDs; renders `(expected …)` on call-arg mismatches
+
+Tracks the server's wire-format rename `ExpressionNode.ruleId` →
+`ExpressionNode.expected`. The Expression section no longer trails
+rule-ID tags like `(R4.2)` on every node — debug noise that wasn't
+helpful for the target audience. In their place, when a call
+argument's resolved unit dimensionally differs from the callee's
+formal, the row now ends with `(expected <formal>)` so the reader
+sees what the call-site demanded without reading the diagnostic
+text. Mismatched argument rows paint 🟡 (the new 🟡-on-`expected`
+override, server-side; see DimFort design/markers.md §4.4), so a
+row with `(expected …)` will never read `marker: "ok"`.
+
 ## [0.2.0] — 2026-05-28
 
 ### Added
