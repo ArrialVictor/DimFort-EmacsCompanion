@@ -6,6 +6,10 @@ Emacs companion for [DimFort](https://github.com/ArrialVictor/DimFort) —
 the dimensional-homogeneity checker for Fortran. Thin LSP client +
 commands; the heavy lifting is done by the `dimfort lsp` server.
 
+Want a hands-on look first? See the [DimFort tour](https://github.com/ArrialVictor/DimFort/blob/main/demos/README.md) —
+a short, self-contained Fortran file that exercises the most common
+diagnostics, with a line-by-line walkthrough.
+
 Works with both **eglot** (built-in since Emacs 29) and **lsp-mode**
 (MELPA). Whichever you've loaded is the one DimFort registers with;
 loading both is harmless.
