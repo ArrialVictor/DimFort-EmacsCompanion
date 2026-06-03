@@ -4,7 +4,7 @@
 
 ;; Author: Victor Arrial
 ;; URL: https://github.com/ArrialVictor/DimFort-EmacsCompanion
-;; Version: 0.2.1
+;; Version: 0.2.2
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: languages, fortran, lsp, tools
 ;; SPDX-License-Identifier: MIT
