@@ -93,45 +93,32 @@ All variables live under `M-x customize-group RET dimfort`:
 
 ## Side panel
 
-`M-x dimfort-panel-toggle` opens a persistent side window that follows
-the cursor. At full feature parity with the VSCode companion, it shows
-six stacked sections (the volatile middle three appear in the `both`
-layout):
+A cursor-following side window rendering the six DimFort sections —
+Expression, Diagnostics, Interactions, Actions, Scope, Imports.
+The full description of what each section shows is the canonical
+[side-panel reference](https://github.com/ArrialVictor/DimFort/blob/main/docs/editor-integration/side-panel.md);
+the controls below are the Emacs-specific bits.
 
-- **Expression** — the unit-algebra tree for the expression under the
-  cursor: each node with its resolved unit, the rule that produced it,
-  and a 🟢 / 🟡 / 🔴 marker. The same content as the detailed hover, but
-  it stays visible while you edit — handy for debugging a mismatch or
-  walking through code with someone.
-- **Diagnostics** — DimFort diagnostics on the cursor line, with the
-  🔴 / 🟡 / 🔵 severity-circle vocabulary (info-level diagnostics such as
-  P001 unparsed regions read the same as the rest).
-- **Interactions** — cross-site unit constraints for the symbol under
-  the cursor (the `dimfort interactions` query): the X001 conflict, if
-  any, then the Declaration / Write / Read / Undetermined groups,
-  each site showing its location, unit, and source snippet.
-- **Actions** — the code actions available at the cursor (Add `@unit{}`
-  / extract literal to a PARAMETER); press `RET` on one to apply it.
-- **Scope** — the declarations of every *enclosing* scope, stacked
-  outermost-first and indented by nesting (a module's declarations,
-  then a contained subroutine's locals). Each variable is marked 🟢
-  (annotated), 🟡 (unannotated), or 🔴 (unparseable annotation), so
-  annotation gaps stand out. `M-x dimfort-scope-filter` narrows the
-  list to variables whose name or unit matches.
-- **Imports** — variables and procedures a `use` clause brings into scope
-  (usable here but declared elsewhere), grouped by source module under a
-  `from <module>` header (functions read as `name(argunits)`, showing
-  their argument + return units, e.g. `force(kg)`). Rows navigate cross-file to where the imported symbol — and
-  its `@unit{}` — is declared. `M-x dimfort-imports-filter` narrows it.
+**Toggle**: open by default on attach. `M-x dimfort-panel-toggle`
+opens or closes the persistent side window.
 
-Press `RET` (or `mouse-1`) on any declaration, diagnostic,
-interaction-site, or import row to jump to it (cross-file for interaction
-sites and imports);
-the file-wide diagnostic counts pin the footer.
+**Settings**:
 
-On by default (opens on attach); set `dimfort-panel-enabled` to `nil`
-to keep it closed and open it on demand. Dock side and width are set
-via `dimfort-panel-side` and `dimfort-panel-width`.
+- `dimfort-panel-enabled` — set to `nil` to keep the panel closed
+  on attach.
+- `dimfort-panel-side` / `dimfort-panel-width` — dock side and
+  width.
+
+**Filters**:
+
+- `M-x dimfort-scope-filter` — narrow the Scope section to
+  variables whose name or unit matches.
+- `M-x dimfort-imports-filter` — same for Imports.
+
+**Navigation**: press `RET` (or `mouse-1`) on any declaration,
+diagnostic, interaction-site, or import row to jump to it
+(cross-file for interaction sites and imports). The file-wide
+diagnostic counts pin the footer.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/ArrialVictor/DimFort/main/docs/img/panel-emacs-hero_dark.png">
