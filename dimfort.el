@@ -676,11 +676,15 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
                               (t (concat prefix "│   "))))
            (expected (dimfort--field node "expected"))
            (assumed (dimfort--field node "assumed"))
+           (collides (dimfort--field node "collides"))
            (marker (dimfort--field node "marker"))
-           ;; Row tail: `(expected …)' on mismatch, `(assumed: <reason>)'
-           ;; on @unit_assume rows. Both may apply; concatenate.
+           ;; Row tail: `(expected …)' on call-arg / RHS mismatch,
+           ;; `(collides with …)' on H020 polymorphic-call-site
+           ;; conflicts, `(assumed: <reason>)' on @unit_assume rows.
+           ;; May apply together; concatenate.
            (extra (concat
                     (if expected (format " (expected %s)" expected) "")
+                    (if collides (format " (collides with %s)" collides) "")
                     (if assumed (format " (assumed: %s)" assumed) "")))
            (entry (list :tree (concat prefix connector
                                       (or (dimfort--field node "label") "?"))
