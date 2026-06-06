@@ -8,6 +8,56 @@ behavioural changes mostly land in the DimFort server itself. Entries
 below cover client-side changes only (eglot/lsp-mode wiring, commands,
 defaults, packaging).
 
+## [0.2.3] — 2026-06-07
+
+### Track DimFort 0.2.3.1's polymorphism feature + in-editor UX polish
+
+This release tracks DimFort's polymorphism feature shipped over
+0.2.3 + 0.2.3.1. Recommended pairing is **server 0.2.3.1** for the
+full hover/panel rendering; the package is forward-compatible with
+0.2.3 servers too.
+
+Server-side (read transparently — no client config added):
+parametric polymorphism (`'a`, `'b`, …) in `@unit{}` annotations,
+four new diagnostic codes (H020 polymorphic-call-site unification
+failure, H021 type-variable-in-forbidden-position, H022
+cannot-bind-tyvar-to-affine-unit (e.g. passing a `degC` actual into
+a `'a` slot — type variables range over the multiplicative algebra
+only), H023
+dishonest-polymorphic-body), the 40-item pre-release audit fix
+series, and the 37 in-source docstring-drift fixes. The eight
+0.2.3.1 follow-up fixes (panel/hover marker propagation, H020
+collides-trailer rendering, message multi-line reformat, clean-call
+no-trailer convention, polymorphic-function return resolution, and
+the `'a = ?` unbound-return form) are similarly server-side — they
+just need the client to render the new fields exposed below. The
+diagnostics surface through `flymake` (eglot) / `lsp-ui-sideline`
+(lsp-mode) like every other diagnostic.
+
+Client-side (this package):
+
+- **`(collides with …)` row tail** on H020 polymorphic-conflict rows.
+  The server's `dimfort/panelInfo` now ships a `collides` field on
+  `ExpressionNode`; the panel renders it as `(collides with <X>)`
+  alongside the existing `(expected …)` and `(assumed: …)` row
+  tails. Forward-compatible: 0.2.3 servers omit the field and the
+  trailer doesn't render.
+- **Dimmed trailing `?`** on the new `'a = ?` unbound-polymorphic-return
+  form. The `dimfort--dim` face applied to bare-`?` / bare-`-` cells
+  is now scoped to the trailing `?` only when the unit ends in
+  `= ?`; the bound prefix stays full-weight. The suffix check is
+  tight enough not to false-positive — concrete units never end in
+  `= ?`.
+- **Polymorphism QA annex** in MANUAL_QA.md (Cases A–G + interactive
+  H021 / H022 probes) — pins every behaviour the 0.2.3.1 server-
+  side fixes deliver.
+
+### Recommended server version
+
+`dimfort >= 0.2.3.1` for the full polish. Earlier 0.2.3 servers
+work — the `collides` field stays absent and the panel renders the
+binding form without the trailer, the rest is unchanged.
+
 ## [0.2.2] — 2026-06-03
 
 ### Passthrough: DimFort 0.2.2's configurable comment delimiters
