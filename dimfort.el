@@ -714,10 +714,20 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
              (unit (plist-get e :unit))
              ;; Dim absence-of-information glyphs ("?" / "-") so real
              ;; units pop. Text properties propagate through concat.
-             (unit-styled (and unit
-                               (if (member unit '("?" "-"))
-                                   (dimfort--dim unit)
-                                 unit)))
+             ;; ``'a = ?`` (H020 unbound polymorphic return) is a
+             ;; third case — mute only the trailing ``?`` so the
+             ;; unknown component reads at the same visual weight as
+             ;; a bare ``?``; the bound prefix stays full-weight. The
+             ;; suffix check is tight enough not to false-positive —
+             ;; concrete units never end in ``= ?``.
+             (unit-styled
+              (cond
+                ((not unit) nil)
+                ((member unit '("?" "-")) (dimfort--dim unit))
+                ((and (>= (length unit) 4)
+                      (string= (substring unit -4) " = ?"))
+                 (concat (substring unit 0 -1) (dimfort--dim "?")))
+                (t unit)))
              (mid (cond
                    (unit (concat " : " unit-styled
                                  (make-string (- unit-w (string-width unit)) ?\s)))
