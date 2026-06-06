@@ -897,3 +897,71 @@ ones render with `'a` in the unit column.
 - **Cross-file polymorphism** — this scene is single-file. Add a
   separate `caller.f90` + `lib.f90` pair if cross-file lookup of a
   polymorphic signature needs verifying.
+
+## Coverage visualisation (0.2.4)
+
+Coverage requires the DimFort server with the `dimfort/lineStatus`
+method (server PR #53 merged). The companion mode is `"disabled"` by
+default; the tests below set it manually.
+
+### Three-mode cycle
+
+With `qa.f90` open:
+
+- [ ] Run `M-x dimfort-cycle-coverage` once → the echo area shows
+      `DimFort: coverage gutter`. Confirm:
+      - **Green fringe dots** on annotated-declaration lines
+        (`real :: c_sound  !< @unit{m/s}` etc.) and on clean
+        expression lines (`d = c_sound * t`, `q = 0.5 * rho * v * v`,
+        the `combo`, `ln_p`, `rt_e2` calculations).
+      - **Yellow fringe dots** on `t_celsius`'s declaration (U005)
+        and on the `t_celsius = t - 273.15` line (H010 D1.5). With
+        U005 propagation (server PR #55), every other line
+        referencing `t_celsius` also paints yellow.
+      - **Red fringe dot** on the `bogus = c_sound * t` line (H001).
+      - Out-of-scope lines (`module`, `contains`, `end function`,
+        `end subroutine`, `end module`, blank lines, comment-only
+        lines) carry no fringe decoration.
+- [ ] Run `M-x dimfort-cycle-coverage` again → echo area shows
+      `DimFort: coverage background`. Confirm:
+      - The fringe dots are gone.
+      - Each in-scope line carries a low-alpha background tint in
+        the matching tier colour. `gutter` and `background` are
+        mutually exclusive — pick the visual weight you prefer.
+- [ ] Run `M-x dimfort-cycle-coverage` a third time → echo area
+      shows `DimFort: coverage disabled`. All coverage decorations
+      clear.
+
+### U005 propagation regression (PR #55)
+
+- [ ] In `gutter` mode, delete `@unit{s}` from the `t` declaration
+      line. Save the buffer. Wait for the post-save refresh
+      (~500 ms after the server's check). Confirm:
+      - The `bogus = c_sound * t` line goes red → **yellow** (must
+        NOT turn green — `t` is now unannotated and propagates
+        yellow to every use site).
+      - The `d = c_sound * t` line also paints yellow.
+      - Restore the annotation; the lines should revert to red /
+        green respectively.
+
+### No LSP restart on mode flip
+
+- [ ] Note the active server (`M-x eglot-events-buffer` shows the
+      server name and id; or `M-x lsp-describe-session` for
+      lsp-mode).
+- [ ] Cycle the coverage mode three times.
+- [ ] Re-check the server view — the same server should be active
+      (no restart). Cycling other settings such as hover via
+      `M-x dimfort-cycle-hover` DOES restart the server; this
+      contrast is the verification.
+
+### Face customisation
+
+- [ ] After cycling to `gutter` mode, override one of the tier
+      colours:
+      `M-x customize-face RET dimfort-coverage-green` →
+      change `:foreground` to a new colour. Save. The green fringe
+      dots should repaint on the next refresh.
+- [ ] Same for background: cycle to `background` mode and
+      customise `dimfort-coverage-bg-green`'s `:background`. The
+      tint should refresh after the next edit.

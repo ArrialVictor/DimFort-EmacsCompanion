@@ -329,7 +329,12 @@ server restart)."
               #'dimfort--schedule-inlay-refresh)
     ;; Open the side panel on attach when the user opted in.
     (add-hook 'eglot-managed-mode-hook
-              #'dimfort--panel-maybe-autoopen)))
+              #'dimfort--panel-maybe-autoopen)
+    ;; Wire up the coverage layer (no-ops in `disabled' mode but the
+    ;; per-buffer hooks are still installed so flipping into
+    ;; `gutter' / `background' later works without an attach cycle).
+    (add-hook 'eglot-managed-mode-hook
+              #'dimfort--coverage-on-attach)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept DimFort commands on Emacs 29's `eglot-execute-command' path."
@@ -386,6 +391,8 @@ any action that has no command of ours) to eglot's default handling."
       (add-to-list 'lsp-language-id-configuration `(,mode . "fortran")))
     ;; Open the side panel on attach when the user opted in.
     (add-hook 'lsp-managed-mode-hook #'dimfort--panel-maybe-autoopen)
+    ;; Coverage layer setup (no-ops in `disabled' mode).
+    (add-hook 'lsp-managed-mode-hook #'dimfort--coverage-on-attach)
     (lsp-register-client
      (make-lsp-client
       :new-connection (lsp-stdio-connection #'dimfort--command)
@@ -562,6 +569,247 @@ are on — invoke this to see the live state."
               (if dimfort-external-modules
                   (mapconcat #'identity dimfort-external-modules ", ")
                 "(none)"))))))
+
+
+;;; Coverage visualisation (0.2.4+)
+;;
+;; Per-line status decoration driven by the server's
+;; `dimfort/lineStatus' LSP method.  Mirrors the VSCompanion and the
+;; Nvim companion: three mutually-exclusive modes
+;; (disabled / gutter / background) toggled via
+;; `dimfort-cycle-coverage'.  `gutter' paints a coloured fringe dot
+;; per line; `background' paints a line-tint via an overlay face.
+;; Both encode the same per-line tier; the user picks the visual
+;; weight they prefer.
+
+(defcustom dimfort-coverage-mode "disabled"
+  "Per-line coverage visualisation mode.
+
+Values:
+- \"disabled\": no decoration.
+- \"gutter\": coloured dot in the left fringe per line, in four
+  tiers (green / yellow / red / blue).
+- \"background\": low-alpha line tint behind the text in the same
+  four tiers.
+
+`gutter' and `background' are mutually exclusive — pick the visual
+weight you prefer.  Cycle with `dimfort-cycle-coverage'.  Requires
+DimFort 0.2.4+ (server side `dimfort/lineStatus' method)."
+  :type '(choice (const "disabled") (const "gutter") (const "background")))
+
+(defcustom dimfort-coverage-debounce 0.5
+  "Seconds to wait after a buffer change before refreshing coverage.
+
+Should be slightly longer than the server's own `didChange'
+debounce (~0.4 s) so the coverage query reaches the server after
+its re-check completes."
+  :type 'number)
+
+(defface dimfort-coverage-green
+  '((t :foreground "#28a745"))
+  "Face for the fringe dot of the green coverage tier (verified-OK).")
+(defface dimfort-coverage-yellow
+  '((t :foreground "#ffc107"))
+  "Face for the fringe dot of the yellow coverage tier (needs attention).")
+(defface dimfort-coverage-red
+  '((t :foreground "#dc3545"))
+  "Face for the fringe dot of the red coverage tier (hard fire).")
+(defface dimfort-coverage-blue
+  '((t :foreground "#0d6efd"))
+  "Face for the fringe dot of the blue coverage tier (unparsed).")
+
+(defface dimfort-coverage-bg-green
+  '((t :background "#0a3320"))
+  "Background face for the green coverage tier in background mode.")
+(defface dimfort-coverage-bg-yellow
+  '((t :background "#3b2e00"))
+  "Background face for the yellow coverage tier in background mode.")
+(defface dimfort-coverage-bg-red
+  '((t :background "#3b0a13"))
+  "Background face for the red coverage tier in background mode.")
+(defface dimfort-coverage-bg-blue
+  '((t :background "#0a1c3b"))
+  "Background face for the blue coverage tier in background mode.")
+
+;; Fringe bitmap shared by all four tiers — a filled circle. The face
+;; (per tier) supplies the colour.
+(when (fboundp 'define-fringe-bitmap)
+  (define-fringe-bitmap 'dimfort-coverage-dot
+    [#b00111100
+     #b01111110
+     #b11111111
+     #b11111111
+     #b11111111
+     #b11111111
+     #b01111110
+     #b00111100]))
+
+(defvar-local dimfort--coverage-overlays nil
+  "Buffer-local list of active coverage overlays.")
+(defvar-local dimfort--coverage-timer nil
+  "Buffer-local debounce timer for coverage refresh.")
+
+(defun dimfort--coverage-clear ()
+  "Remove every coverage overlay from the current buffer."
+  (dolist (ov dimfort--coverage-overlays)
+    (when (overlayp ov)
+      (delete-overlay ov)))
+  (setq dimfort--coverage-overlays nil))
+
+(defun dimfort--coverage-uri ()
+  "Return the file:// URI for the current buffer, or nil if none."
+  (let ((file (buffer-file-name)))
+    (when file
+      (concat "file://" (expand-file-name file)))))
+
+(defun dimfort--coverage-apply (lines)
+  "Paint LINES — a sequence of `:line' / `:status' plists — in the current buffer.
+Clears any previous coverage decoration first."
+  (dimfort--coverage-clear)
+  (when (not (string= dimfort-coverage-mode "disabled"))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (let ((max-line (line-number-at-pos (point-max))))
+          (mapc
+           (lambda (entry)
+             (let ((lnum (or (plist-get entry :line)
+                             (and (hash-table-p entry)
+                                  (gethash "line" entry))))
+                   (status (or (plist-get entry :status)
+                               (and (hash-table-p entry)
+                                    (gethash "status" entry)))))
+               (when (and lnum status (<= lnum max-line))
+                 (goto-char (point-min))
+                 (forward-line (1- lnum))
+                 (let* ((beg (point))
+                        (end (line-end-position))
+                        (face-fg (intern (format "dimfort-coverage-%s" status)))
+                        (face-bg (intern (format "dimfort-coverage-bg-%s" status))))
+                   (cond
+                    ((string= dimfort-coverage-mode "gutter")
+                     (let ((ov (make-overlay beg beg)))
+                       (overlay-put
+                        ov 'before-string
+                        (propertize " " 'display
+                                    `(left-fringe dimfort-coverage-dot ,face-fg)))
+                       (overlay-put ov 'dimfort-coverage t)
+                       (push ov dimfort--coverage-overlays)))
+                    ((string= dimfort-coverage-mode "background")
+                     ;; Extend to the start of the next line so the
+                     ;; whole row is tinted (including trailing
+                     ;; whitespace and the newline).
+                     (let ((ov (make-overlay beg (min (1+ end) (point-max)))))
+                       (overlay-put ov 'face face-bg)
+                       ;; Low priority so squiggles / other overlays
+                       ;; remain visible above the tint.
+                       (overlay-put ov 'priority -50)
+                       (overlay-put ov 'dimfort-coverage t)
+                       (push ov dimfort--coverage-overlays))))))))
+           lines))))))
+
+(defun dimfort--coverage-request ()
+  "Send the `dimfort/lineStatus' request for the current buffer and paint."
+  (let ((uri (dimfort--coverage-uri))
+        (buf (current-buffer)))
+    (cond
+     ;; eglot path
+     ((and uri (featurep 'eglot)
+           (fboundp 'eglot-current-server)
+           (eglot-current-server))
+      (let ((server (eglot-current-server)))
+        (when server
+          (jsonrpc-async-request
+           server :dimfort/lineStatus `(:uri ,uri)
+           :success-fn
+           (lambda (result)
+             (when (buffer-live-p buf)
+               (with-current-buffer buf
+                 (let ((lines (or (plist-get result :lines)
+                                  (and (hash-table-p result)
+                                       (gethash "lines" result)))))
+                   (dimfort--coverage-apply (or lines '()))))))
+           :error-fn (lambda (&rest _) nil)
+           :timeout-fn (lambda (&rest _) nil)))))
+     ;; lsp-mode path
+     ((and uri (featurep 'lsp-mode)
+           (fboundp 'lsp-request-async))
+      (lsp-request-async
+       "dimfort/lineStatus" `(:uri ,uri)
+       (lambda (result)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (let ((lines (or (and (hash-table-p result)
+                                   (gethash "lines" result))
+                              (plist-get result :lines))))
+               (dimfort--coverage-apply (or lines '()))))))
+       :mode 'tick)))))
+
+(defun dimfort--coverage-schedule-refresh ()
+  "Schedule a coverage refresh after the debounce on the current buffer."
+  (when dimfort--coverage-timer
+    (cancel-timer dimfort--coverage-timer))
+  (let ((buf (current-buffer)))
+    (setq dimfort--coverage-timer
+          (run-at-time
+           dimfort-coverage-debounce nil
+           (lambda ()
+             (when (buffer-live-p buf)
+               (with-current-buffer buf
+                 (setq dimfort--coverage-timer nil)
+                 (dimfort--coverage-request))))))))
+
+(defun dimfort--coverage-on-after-change (_beg _end _len)
+  "Hook for `after-change-functions': schedule a debounced refresh."
+  (unless (string= dimfort-coverage-mode "disabled")
+    (dimfort--coverage-schedule-refresh)))
+
+(defun dimfort--coverage-on-attach ()
+  "Hook for `eglot-managed-mode-hook' / `lsp-managed-mode-hook'.
+Wires up the per-buffer refresh trigger and paints once initially."
+  (add-hook 'after-change-functions
+            #'dimfort--coverage-on-after-change nil t)
+  (add-hook 'after-save-hook
+            (lambda ()
+              (unless (string= dimfort-coverage-mode "disabled")
+                (dimfort--coverage-schedule-refresh)))
+            nil t)
+  (unless (string= dimfort-coverage-mode "disabled")
+    ;; Initial paint: defer slightly so the first server check has a
+    ;; chance to complete on attach.
+    (run-at-time 1.5 nil
+                 (lambda ()
+                   (when (buffer-live-p (current-buffer))
+                     (dimfort--coverage-request))))))
+
+(defun dimfort--coverage-refresh-all ()
+  "Refresh coverage in every buffer that has a DimFort LSP attached."
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (or (and (featurep 'eglot)
+                     (fboundp 'eglot-current-server)
+                     (eglot-current-server))
+                (and (featurep 'lsp-mode)
+                     (fboundp 'lsp-workspaces)
+                     (lsp-workspaces)))
+        (dimfort--coverage-clear)
+        (unless (string= dimfort-coverage-mode "disabled")
+          (dimfort--coverage-request))))))
+
+;;;###autoload
+(defun dimfort-cycle-coverage ()
+  "Cycle the coverage visualisation mode.
+
+Order: disabled → gutter → background → disabled.  Companion-only
+— flipping the mode does NOT restart the language server."
+  (interactive)
+  (let* ((order '("disabled" "gutter" "background"))
+         (pos (or (cl-position dimfort-coverage-mode order :test #'equal) -1))
+         (next (nth (mod (1+ pos) (length order)) order)))
+    (setq dimfort-coverage-mode next)
+    (message "DimFort: coverage %s" next)
+    (dimfort--coverage-refresh-all)))
+
 
 ;;; Side panel
 

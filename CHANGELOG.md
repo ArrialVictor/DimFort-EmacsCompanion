@@ -8,6 +8,32 @@ behavioural changes mostly land in the DimFort server itself. Entries
 below cover client-side changes only (eglot/lsp-mode wiring, commands,
 defaults, packaging).
 
+## [Unreleased]
+
+### Added
+
+- **Coverage visualisation** — per-line status decoration driven by
+  the server's `dimfort/lineStatus` LSP method (requires DimFort
+  0.2.4+). Custom variable `dimfort-coverage-mode` (`"disabled"` |
+  `"gutter"` | `"background"`) controls the layer; default is
+  `"disabled"` (opt-in). Command `M-x dimfort-cycle-coverage`
+  cycles through the three modes. `gutter` and `background` are
+  mutually-exclusive visual encodings of the same per-line tier
+  (green / yellow / red / blue); pick the visual weight you prefer.
+  Refresh is driven by `after-change-functions` with debounce plus
+  `after-save-hook`; the per-buffer debounce
+  (`dimfort-coverage-debounce`, default 0.5 s) is set slightly
+  longer than the server's own `didChange` debounce so the
+  coverage query lands after the server's re-check completes.
+  Coverage settings are companion-only — flipping the mode does
+  not restart the language server.
+
+  Customisation: the four fringe-dot faces
+  (`dimfort-coverage-green` / `-yellow` / `-red` / `-blue`) and the
+  four background faces (`dimfort-coverage-bg-*`) are user-
+  customisable via `M-x customize-face` or `set-face-attribute`.
+  Both eglot and lsp-mode backends are supported.
+
 ## [0.2.3] — 2026-06-07
 
 ### Track DimFort 0.2.3.1's polymorphism feature + in-editor UX polish
