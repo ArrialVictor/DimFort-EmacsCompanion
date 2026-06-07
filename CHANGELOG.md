@@ -32,7 +32,10 @@ defaults, packaging).
   (`dimfort-coverage-green` / `-yellow` / `-red` / `-blue`) and the
   four background faces (`dimfort-coverage-bg-*`) are user-
   customisable via `M-x customize-face` or `set-face-attribute`.
-  Both eglot and lsp-mode backends are supported.
+  The background faces are **theme-aware**: each carries separate
+  `(background dark)` / `(background light)` specs so the tint reads
+  as a subtle wash on either kind of theme without per-user
+  customisation. Both eglot and lsp-mode backends are supported.
 
 ## [0.2.3] — 2026-06-07
 

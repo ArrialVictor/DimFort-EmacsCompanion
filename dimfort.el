@@ -605,6 +605,9 @@ debounce (~0.4 s) so the coverage query reaches the server after
 its re-check completes."
   :type 'number)
 
+;; Fringe-dot foreground faces. The same saturated hex reads well on
+;; both light and dark backgrounds, so a single ``t'' spec is fine
+;; here — the colour stays consistent across theme switches.
 (defface dimfort-coverage-green
   '((t :foreground "#28a745"))
   "Face for the fringe dot of the green coverage tier (verified-OK).")
@@ -618,17 +621,33 @@ its re-check completes."
   '((t :foreground "#0d6efd"))
   "Face for the fringe dot of the blue coverage tier (unparsed).")
 
+;; Background tint faces. Theme-aware via the ``(background dark)'' /
+;; ``(background light)'' display selectors — Emacs picks the
+;; appropriate spec based on ``(frame-parameter nil 'background-mode)``
+;; which is derived from the active colorscheme. The dark-theme hexes
+;; are pre-darkened so the tint reads as a subtle wash on a dark
+;; background; the light-theme hexes are pre-lightened so the tint
+;; reads as a subtle wash on white. ``M-x customize-face'' lets users
+;; override either spec individually.
 (defface dimfort-coverage-bg-green
-  '((t :background "#0a3320"))
+  '((((background dark))  :background "#0a3320")
+    (((background light)) :background "#d4f4dd")
+    (t :background "#d4f4dd"))
   "Background face for the green coverage tier in background mode.")
 (defface dimfort-coverage-bg-yellow
-  '((t :background "#3b2e00"))
+  '((((background dark))  :background "#3b2e00")
+    (((background light)) :background "#fff3cd")
+    (t :background "#fff3cd"))
   "Background face for the yellow coverage tier in background mode.")
 (defface dimfort-coverage-bg-red
-  '((t :background "#3b0a13"))
+  '((((background dark))  :background "#3b0a13")
+    (((background light)) :background "#f8d7da")
+    (t :background "#f8d7da"))
   "Background face for the red coverage tier in background mode.")
 (defface dimfort-coverage-bg-blue
-  '((t :background "#0a1c3b"))
+  '((((background dark))  :background "#0a1c3b")
+    (((background light)) :background "#cfe2ff")
+    (t :background "#cfe2ff"))
   "Background face for the blue coverage tier in background mode.")
 
 ;; Fringe bitmap shared by all four tiers — a filled circle. The face
