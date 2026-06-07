@@ -86,6 +86,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-cycle-hover`        | Cycle hover verbosity (disabled → short → detailed); restarts. |
 | `M-x dimfort-toggle-cache`       | Toggle the content-hash cache (off ↔ read-write); restarts. |
 | `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `.dimfort.toml`. |
+| `M-x dimfort-cycle-coverage`     | Cycle coverage visualisation (`disabled` → `gutter` → `background`); companion-only, no LSP restart. |
 | `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel. |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
 | `M-x dimfort-scope-filter`       | Filter the panel's Scope section by name/unit (empty clears). |
@@ -140,6 +141,16 @@ Same surface as the VSCode companion:
 - Inlay hints, go-to-definition, completion, code actions
   (toggleable).
 - Workspace-wide cross-file checks driven from `use` clauses.
+- **Coverage visualisation** (requires DimFort 0.2.4+) — per-line
+  status in one of two mutually-exclusive visual encodings:
+  - **Gutter** — coloured fringe dot per line, in four tiers (green /
+    yellow / red / blue).
+  - **Background** — line tint behind the text in the same four tiers.
+  Off by default; toggle with `M-x dimfort-cycle-coverage`. Customise
+  the colours via the faces `dimfort-coverage-green` /
+  `dimfort-coverage-yellow` / `dimfort-coverage-red` /
+  `dimfort-coverage-blue` (fringe dots) and
+  `dimfort-coverage-bg-*` (line tint).
 
 ## Notes
 
