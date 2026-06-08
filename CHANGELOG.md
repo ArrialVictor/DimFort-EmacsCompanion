@@ -12,6 +12,26 @@ defaults, packaging).
 
 ### Added
 
+- **Workspace coverage bar** — side-panel footer now renders a
+  unified bar showing per-file and whole-workspace coverage stats:
+  `File: 78% (🟡 18 🔴 2)   WS: 12.9% (🟡 N 🔴 M)`. File-scope
+  refreshes live on every edit via `dimfort/coverageStats`;
+  workspace-scope is populated by `M-x dimfort-check-workspace`
+  (async since DimFort 0.2.5 — the executeCommand returns an ack
+  immediately and the payload arrives via the new
+  `dimfort/workspaceCheckCompleted` notification). Three WS states:
+  `WS: –` (dimmed) before the first refresh, a Braille spinner
+  (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, 80 ms cadence) while the server-side daemon
+  worker is running, and `WS: <pct>%` after. Numbers dim once any
+  buffer edit fires after the last successful refresh so the user
+  knows the snapshot may be stale. Requires DimFort 0.2.5+. New
+  helpers `dimfort--handle-workspace-check-completed`,
+  `dimfort--ws-start-spinner`, and `dimfort--panel-render-footer`
+  alongside the existing panel renderer; mirrors the VSCompanion
+  `CoverageStatsProvider` and the Nvim companion `stats.lua`
+  module. Replaces the previous footer that surfaced only raw
+  🔴 / 🟡 diagnostic counts for the active file.
+
 - **Coverage visualisation** — per-line status decoration driven by
   the server's `dimfort/lineStatus` LSP method (requires DimFort
   0.2.4+). Custom variable `dimfort-coverage-mode` (`"disabled"` |

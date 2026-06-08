@@ -240,6 +240,22 @@ Position objects (plist under eglot, hash-table under lsp-mode)."
       (switch-to-buffer buf))))
 
 
+;; Workspace-bar state forward-declared so callers in eglot /
+;; lsp-mode setup blocks can reference them without byte-compilation
+;; free-variable warnings.  Real defvars + the helper functions live
+;; further down with the panel renderer (search for the
+;; "Workspace coverage bar" section).
+(defvar dimfort--ws-snapshot)
+(defvar dimfort--ws-stale)
+(defvar dimfort--ws-refreshing)
+(defvar dimfort--ws-spinner-frame)
+(defvar dimfort--ws-spinner-timer)
+(defvar dimfort--file-coverage-cache)
+(defvar dimfort--panel-buffer)
+(defvar dimfort--panel-last-payload)
+(defvar dimfort--panel-divider)
+
+
 ;;; eglot integration
 
 (defvar eglot-server-programs)
@@ -372,6 +388,19 @@ any action that has no command of ours) to eglot's default handling."
       (apply #'dimfort--extract-to-parameter (append arguments nil)))
      (t (apply orig server action rest)))))
 
+;; Async workspace check (DimFort 0.2.5+): catch the server-fired
+;; `dimfort/workspaceCheckCompleted' notification.  eglot dispatches
+;; custom notifications via `eglot-handle-notification' specialised
+;; on the method symbol; we route the payload to the shared handler.
+(cl-defmethod eglot-handle-notification
+  (_server (_method (eql dimfort/workspaceCheckCompleted)) &rest params
+   &allow-other-keys)
+  "Catch the workspace-check completion notification from DimFort."
+  (dimfort--handle-workspace-check-completed
+   ;; eglot delivers notification params as a plist via &rest; the
+   ;; shared handler treats it the same shape as lsp-mode's hash.
+   params))
+
 
 ;;; lsp-mode integration
 
@@ -399,6 +428,13 @@ any action that has no command of ours) to eglot's default handling."
       :activation-fn (lsp-activate-on "fortran")
       :server-id 'dimfort
       :initialization-options #'dimfort--init-options
+      :notification-handlers
+      (let ((m (make-hash-table :test #'equal)))
+        (puthash "dimfort/workspaceCheckCompleted"
+                 (lambda (_workspace params)
+                   (dimfort--handle-workspace-check-completed params))
+                 m)
+        m)
       :action-handlers
       (let ((m (make-hash-table :test #'equal)))
         (puthash "dimfort.insertSnippet"
@@ -461,16 +497,39 @@ leave the buffer with the pre-restart hint cache."
 
 ;;;###autoload
 (defun dimfort-check-workspace ()
-  "Run the workspace-wide unit check via workspace/executeCommand."
+  "Run the workspace-wide unit check via workspace/executeCommand.
+
+Async since DimFort 0.2.5: the server returns an ack immediately and
+delivers the coverage payload via the `dimfort/workspaceCheckCompleted'
+notification.  The spinner runs until that notification arrives.
+A duplicate trigger while a check is already in flight is coalesced
+server-side; the server sends a heads-up toast in that case."
   (interactive)
   (cond
-   ((and (featurep 'eglot) (fboundp 'eglot-current-server))
+   (dimfort--ws-refreshing
+    (message "DimFort: workspace check already in progress"))
+   ((and (featurep 'eglot) (fboundp 'eglot-current-server)
+         (eglot-current-server))
+    (setq dimfort--ws-refreshing t)
+    (dimfort--ws-start-spinner)
+    (dimfort--panel-repaint)
     (let ((server (eglot-current-server)))
-      (if server
+      (condition-case nil
           (eglot-execute-command server "dimfort.checkWorkspace" [])
-        (message "DimFort: no active eglot server."))))
+        (error
+         (setq dimfort--ws-refreshing nil)
+         (dimfort--ws-stop-spinner)
+         (dimfort--panel-repaint)))))
    ((and (featurep 'lsp-mode) (fboundp 'lsp--send-execute-command))
-    (lsp--send-execute-command "dimfort.checkWorkspace" []))
+    (setq dimfort--ws-refreshing t)
+    (dimfort--ws-start-spinner)
+    (dimfort--panel-repaint)
+    (condition-case nil
+        (lsp--send-execute-command "dimfort.checkWorkspace" [])
+      (error
+       (setq dimfort--ws-refreshing nil)
+       (dimfort--ws-stop-spinner)
+       (dimfort--panel-repaint))))
    (t (message "DimFort: no LSP client active for this buffer."))))
 
 ;; Per-feature toggles: flip the customizable variable, restart the
@@ -781,7 +840,15 @@ Clears any previous coverage decoration first."
 (defun dimfort--coverage-on-after-change (_beg _end _len)
   "Hook for `after-change-functions': schedule a debounced refresh."
   (unless (string= dimfort-coverage-mode "disabled")
-    (dimfort--coverage-schedule-refresh)))
+    (dimfort--coverage-schedule-refresh))
+  ;; Workspace coverage bar: mark the workspace snapshot stale and
+  ;; refresh the file-scope stats so the footer's File: cell tracks
+  ;; live edits.  Cheap LSP round-trip; same debounce path as the
+  ;; per-line coverage refresh.
+  (when (and dimfort--ws-snapshot (not dimfort--ws-stale))
+    (setq dimfort--ws-stale t)
+    (dimfort--panel-repaint))
+  (dimfort--coverage-stats-refresh-active))
 
 (defun dimfort--coverage-on-attach ()
   "Hook for `eglot-managed-mode-hook' / `lsp-managed-mode-hook'.
@@ -871,6 +938,202 @@ with `dimfort-panel-toggle'."
 (defcustom dimfort-panel-layout 'both
   "Which panel sections to show."
   :type '(choice (const both) (const expression) (const routine)))
+
+;;; Workspace coverage bar — file + workspace stats footer
+;;
+;; Mirrors the VSCompanion `CoverageStatsProvider` and the Nvim
+;; companion's stats.lua module. Three pieces of state:
+;;
+;;   * `dimfort--ws-snapshot`: the workspace coverage payload from the
+;;     most recent `dimfort/workspaceCheckCompleted' notification, or
+;;     nil before the first refresh.
+;;
+;;   * `dimfort--ws-stale': non-nil once any diagnostics change after
+;;     the last successful workspace refresh.  The footer dims the WS
+;;     segment while this is set.
+;;
+;;   * `dimfort--ws-refreshing': non-nil while a workspace check is
+;;     in flight on the server side.  Drives the Braille-spinner
+;;     animation in the WS segment.
+;;
+;; File-scope refreshes are served by `dimfort/coverageStats' (the
+;; same server endpoint used by the VS / Nvim companions); the
+;; results live in `dimfort--file-coverage-cache' keyed by URI.
+;;
+;; Async since DimFort 0.2.5: the executeCommand returns an ack
+;; immediately and the workspace coverage payload arrives later via
+;; `dimfort/workspaceCheckCompleted'.  The notification handler
+;; (`dimfort--handle-workspace-check-completed') stores the payload
+;; and stops the spinner.
+
+(defvar dimfort--ws-snapshot nil
+  "Plist `(:ok N :warn N :fire N :coverage-pct PCT)' for the workspace.
+nil before the first manual `dimfort-check-workspace' completes.")
+
+(defvar dimfort--ws-stale nil
+  "Non-nil when files have changed since the last workspace refresh.
+The footer dims the WS segment in that case.")
+
+(defvar dimfort--ws-refreshing nil
+  "Non-nil while a workspace check is in flight.
+Drives the spinner and keeps duplicate triggers coalesced.")
+
+(defvar dimfort--ws-spinner-frame 0
+  "Current frame index into `dimfort--ws-spinner-frames'.")
+
+(defvar dimfort--ws-spinner-timer nil
+  "Active spinner repeating timer, or nil.")
+
+(defconst dimfort--ws-spinner-frames
+  ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
+  "Braille spinner cycle, ~80 ms cadence to match the other companions.")
+
+(defconst dimfort--ws-spinner-interval 0.08
+  "Spinner repaint interval (seconds).")
+
+(defvar dimfort--file-coverage-cache (make-hash-table :test #'equal)
+  "URI → plist `(:ok N :warn N :fire N :coverage-pct PCT)' for file-scope.")
+
+(defun dimfort--coverage-from-row (row)
+  "Build the canonical plist shape from a server-side coverage ROW."
+  (list :ok (or (dimfort--field row "ok") 0)
+        :warn (or (dimfort--field row "warn") 0)
+        :fire (or (dimfort--field row "fire") 0)
+        :coverage-pct (or (dimfort--field row "coverage_pct") 0)))
+
+(defun dimfort--ws-stop-spinner ()
+  "Cancel the spinner repeating timer if any."
+  (when dimfort--ws-spinner-timer
+    (cancel-timer dimfort--ws-spinner-timer)
+    (setq dimfort--ws-spinner-timer nil)))
+
+(defun dimfort--ws-start-spinner ()
+  "Start the spinner repeating timer, repainting the panel each frame."
+  (dimfort--ws-stop-spinner)
+  (setq dimfort--ws-spinner-frame 0)
+  (setq dimfort--ws-spinner-timer
+        (run-at-time
+         dimfort--ws-spinner-interval
+         dimfort--ws-spinner-interval
+         (lambda ()
+           (setq dimfort--ws-spinner-frame
+                 (mod (1+ dimfort--ws-spinner-frame)
+                      (length dimfort--ws-spinner-frames)))
+           (dimfort--panel-repaint)))))
+
+(defun dimfort--ws-spinner-glyph ()
+  "Return the current Braille spinner frame."
+  (aref dimfort--ws-spinner-frames
+        (mod dimfort--ws-spinner-frame
+             (length dimfort--ws-spinner-frames))))
+
+(defun dimfort--handle-workspace-check-completed (params)
+  "Notification handler for `dimfort/workspaceCheckCompleted'.
+PARAMS is the server-side workspace coverage payload, or `(:failed t)'
+on the daemon worker's crash path.  Clears the in-flight flag and
+spinner, updates `dimfort--ws-snapshot' on success, and repaints the
+panel so the bar reflects the new state."
+  (setq dimfort--ws-refreshing nil)
+  (dimfort--ws-stop-spinner)
+  (unless (or (null params)
+              (and (hash-table-p params)
+                   (gethash "failed" params))
+              (plist-get params :failed))
+    (let ((total (dimfort--field params "total")))
+      (when total
+        (setq dimfort--ws-snapshot (dimfort--coverage-from-row total))
+        (setq dimfort--ws-stale nil))))
+  (dimfort--panel-repaint))
+
+(defun dimfort--ws-on-diagnostics-changed ()
+  "Mark the workspace snapshot stale, refresh the active file's stats.
+Called from the LSP-mode / eglot diagnostics-change hooks."
+  (when (and dimfort--ws-snapshot (not dimfort--ws-stale))
+    (setq dimfort--ws-stale t)
+    (dimfort--panel-repaint))
+  (dimfort--coverage-stats-refresh-active))
+
+(defun dimfort--coverage-stats-refresh-active ()
+  "Send `dimfort/coverageStats' for the current buffer's URI.
+Updates `dimfort--file-coverage-cache' on response and repaints."
+  (let ((uri (dimfort--coverage-uri)))
+    (when uri
+      (cond
+       ((and (featurep 'eglot)
+             (fboundp 'eglot-current-server)
+             (eglot-current-server))
+        (let ((server (eglot-current-server)))
+          (when server
+            (jsonrpc-async-request
+             server :dimfort/coverageStats `(:uri ,uri)
+             :success-fn
+             (lambda (result)
+               (dimfort--coverage-stats-store uri result))
+             :error-fn (lambda (&rest _) nil)
+             :timeout-fn (lambda (&rest _) nil)))))
+       ((and (featurep 'lsp-mode)
+             (fboundp 'lsp-request-async))
+        (lsp-request-async
+         "dimfort/coverageStats" `(:uri ,uri)
+         (lambda (result)
+           (dimfort--coverage-stats-store uri result))
+         :mode 'tick))))))
+
+(defun dimfort--coverage-stats-store (uri result)
+  "Cache the file-scope coverage RESULT for URI and repaint the panel."
+  (let ((files (or (and (hash-table-p result) (gethash "files" result))
+                   (plist-get result :files))))
+    (cond
+     ((or (null files) (zerop (length files)))
+      (remhash uri dimfort--file-coverage-cache))
+     (t
+      (let ((row (if (vectorp files) (aref files 0) (car files))))
+        (when row
+          (puthash uri (dimfort--coverage-from-row row)
+                   dimfort--file-coverage-cache))))))
+  (dimfort--panel-repaint))
+
+(defun dimfort--coverage-active-uri ()
+  "Return the URI of the currently active Fortran buffer, or nil."
+  (when (memq major-mode dimfort-fortran-modes)
+    (dimfort--coverage-uri)))
+
+(defun dimfort--panel-repaint ()
+  "Repaint the panel buffer from the cached last payload.
+Thin wrapper that re-renders cells using `dimfort--panel-last-payload'
+and the current footer state without sending any LSP request — used
+by the workspace coverage bar's spinner, notification handler, and
+stale-flag toggle.  No-op when the panel buffer doesn't exist."
+  (when (get-buffer dimfort--panel-buffer)
+    (dimfort--panel-paint
+     (dimfort--panel-render dimfort--panel-last-payload) nil)))
+
+(defun dimfort--panel-render-footer ()
+  "Return the footer cells for the workspace + file coverage bar.
+Always returns at least the divider + bar row so the footer is
+visible regardless of payload state."
+  (let* ((file-uri (dimfort--coverage-active-uri))
+         (file (and file-uri (gethash file-uri dimfort--file-coverage-cache)))
+         (file-text (if file
+                        (format "File: %d%% (🟡 %d 🔴 %d)"
+                                (plist-get file :coverage-pct)
+                                (plist-get file :warn)
+                                (plist-get file :fire))
+                      (dimfort--dim "File: –")))
+         (ws-text (cond
+                   (dimfort--ws-refreshing
+                    (dimfort--dim
+                     (format "WS: %s" (dimfort--ws-spinner-glyph))))
+                   ((null dimfort--ws-snapshot)
+                    (dimfort--dim "WS: –"))
+                   (t
+                    (let ((s (format "WS: %d%% (🟡 %d 🔴 %d)"
+                                     (plist-get dimfort--ws-snapshot :coverage-pct)
+                                     (plist-get dimfort--ws-snapshot :warn)
+                                     (plist-get dimfort--ws-snapshot :fire))))
+                      (if dimfort--ws-stale (dimfort--dim s) s))))))
+    (list (dimfort--cell dimfort--panel-divider)
+          (dimfort--cell (concat file-text "   " ws-text)))))
 
 (defconst dimfort--panel-buffer "*dimfort-panel*")
 (defconst dimfort--panel-divider (make-string 60 ?─))
@@ -1323,15 +1586,12 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
         (sec "Imports"
              (dimfort--panel-render-imports
               (and payload (dimfort--field payload "imports")))))
-      ;; Footer: whole-file diagnostic counts.
-      (when (and (eq dimfort-panel-layout 'both) payload
-                 (dimfort--field payload "fileDiagnosticCounts"))
-        (let ((counts (dimfort--field payload "fileDiagnosticCounts")))
-          (add (dimfort--cell dimfort--panel-divider)
-               (dimfort--cell
-                (format "File: 🔴 %s   🟡 %s"
-                        (or (dimfort--field counts "error") 0)
-                        (or (dimfort--field counts "warning") 0)))))))
+      ;; Footer: coverage bar (file + workspace).  Always rendered
+      ;; in the layouts that include the routine block so the user
+      ;; sees the WS state regardless of whether the active buffer
+      ;; carries a panelInfo payload.
+      (when (memq dimfort-panel-layout '(both routine))
+        (setq rows (append rows (dimfort--panel-render-footer)))))
     rows))
 
 (defun dimfort--panel-paint (cells stale)
