@@ -254,6 +254,7 @@ Position objects (plist under eglot, hash-table under lsp-mode)."
 (defvar dimfort--panel-buffer)
 (defvar dimfort--panel-last-payload)
 (defvar dimfort--panel-divider)
+(defvar dimfort--panel-source-buffer)
 
 
 ;;; eglot integration
@@ -502,7 +503,52 @@ leave the buffer with the pre-restart hint cache."
             (eglot-ensure)
             (dimfort--schedule-inlay-refresh))
         (message "DimFort: no active eglot server in this buffer."))))
-   (t (message "DimFort: neither eglot nor lsp-mode is active."))))
+   (t (message "DimFort: neither eglot nor lsp-mode is active.")))
+  ;; Force one panel refresh once the new LSP client is actually
+  ;; reachable from the source buffer.  Polling with a deadline
+  ;; rather than a fixed delay because:
+  ;;   - eglot-ensure and lsp-mode's workspace-restart are
+  ;;     fire-and-forget; we can't await the attach.
+  ;;   - A fixed delay (tried 0.8 s, 2 s) either fires before
+  ;;     the new server is reachable (request returns empty,
+  ;;     panel rebuilds against null payload) or feels sluggish
+  ;;     on warm restarts.
+  ;; Without this, a scale-toggle / hover-mode / cache-mode flip
+  ;; would leave the panel showing the prior server's payload
+  ;; until the user moved the cursor.
+  (dimfort--restart-wait-and-refresh (+ (float-time) 10.0)))
+
+(defun dimfort--restart-have-server-p (buf)
+  "Return non-nil when an LSP client is actively attached to BUF."
+  (and (buffer-live-p buf)
+       (with-current-buffer buf
+         (or (and (featurep 'eglot)
+                  (fboundp 'eglot-current-server)
+                  (eglot-current-server))
+             (and (featurep 'lsp-mode)
+                  (fboundp 'lsp-workspaces)
+                  (lsp-workspaces))))))
+
+(defun dimfort--restart-wait-and-refresh (deadline)
+  "Poll until an LSP server is reachable, then refresh once.
+Refreshes both the panel (so the cursor-position analysis populates
+against the new server) and the file-coverage stats for the source
+buffer (so the footer's File: segment doesn't keep the prior
+server's numbers).  DEADLINE is a `float-time' cutoff; give up
+silently after it."
+  (let ((buf dimfort--panel-source-buffer))
+    (cond
+     ((and buf (dimfort--restart-have-server-p buf))
+      (with-current-buffer buf
+        ;; Panel: cursor-position params + dimfort/panelInfo request.
+        (ignore-errors (dimfort--panel-refresh))
+        ;; File-coverage stats: refresh active-file's footer File:
+        ;; segment.  Without this, the segment carries the prior
+        ;; server's numbers until the user edits the buffer.
+        (ignore-errors (dimfort--coverage-stats-refresh-active))))
+     ((< (float-time) deadline)
+      (run-at-time 0.3 nil #'dimfort--restart-wait-and-refresh deadline))
+     (t nil))))
 
 ;;;###autoload
 (defun dimfort-check-workspace ()
