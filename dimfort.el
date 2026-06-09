@@ -963,7 +963,7 @@ with `dimfort-panel-toggle'."
 ;;
 ;;   * `dimfort--ws-refreshing': non-nil while a workspace check is
 ;;     in flight on the server side.  Drives the Braille-spinner
-;;     animation in the WS segment.
+;;     animation in the Project segment.
 ;;
 ;; File-scope refreshes are served by `dimfort/coverageStats' (the
 ;; same server endpoint used by the VS / Nvim companions); the
@@ -981,7 +981,7 @@ nil before the first manual `dimfort-check-workspace' completes.")
 
 (defvar dimfort--ws-stale nil
   "Non-nil when files have changed since the last workspace refresh.
-The footer dims the WS segment in that case.")
+The footer dims the Project segment in that case.")
 
 (defvar dimfort--ws-refreshing nil
   "Non-nil while a workspace check is in flight.
@@ -1132,11 +1132,11 @@ visible regardless of payload state."
          (ws-text (cond
                    (dimfort--ws-refreshing
                     (dimfort--dim
-                     (format "WS: %s" (dimfort--ws-spinner-glyph))))
+                     (format "Project: %s" (dimfort--ws-spinner-glyph))))
                    ((null dimfort--ws-snapshot)
-                    (dimfort--dim "WS: –"))
+                    (dimfort--dim "Project: –"))
                    (t
-                    (let ((s (format "WS: %d%% (🟡 %d 🔴 %d)"
+                    (let ((s (format "Project: %d%% (🟡 %d 🔴 %d)"
                                      (plist-get dimfort--ws-snapshot :coverage-pct)
                                      (plist-get dimfort--ws-snapshot :warn)
                                      (plist-get dimfort--ws-snapshot :fire))))
