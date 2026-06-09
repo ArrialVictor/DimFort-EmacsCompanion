@@ -2,6 +2,9 @@
 
 ![preview](social_preview.png)
 
+[![CI](https://github.com/ArrialVictor/DimFort-EmacsCompanion/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/ArrialVictor/DimFort-EmacsCompanion/actions/workflows/lint.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ArrialVictor/DimFort-EmacsCompanion/blob/main/LICENSE)
+
 Emacs companion for [DimFort](https://github.com/ArrialVictor/DimFort) —
 the dimensional-homogeneity checker for Fortran. Thin LSP client +
 commands; the heavy lifting is done by the `dimfort lsp` server.

@@ -48,7 +48,7 @@ truth for behavioural QA is `MANUAL_QA.md`.
   responses are authoritative.
 - Match the surface of the VSCode and Nvim companions where it makes sense
   — the three are intentionally feature-parallel. Cross-companion design notes
-  live in the DimFort server repo's `docs/design/panel-info.md`.
+  live in the DimFort server repo's `docs/design/shipped/panel-info.md`.
 - Panel rendering uses `string-width` for column alignment (Emacs's built-in
   display-width-aware function — unlike Lua's byte-length `#`, this Just Works
   for multi-byte unit chars like `·` and `⁻¹`).
