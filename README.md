@@ -79,7 +79,7 @@ All variables live under `M-x customize-group RET dimfort`:
 
 | Command                          | Effect                                          |
 |----------------------------------|-------------------------------------------------|
-| `M-x dimfort-check-workspace`    | Run the workspace-wide unit check; refreshes the panel footer's `WS:` segment. |
+| `M-x dimfort-check-workspace`    | Run the workspace-wide unit check; refreshes the panel footer's `Project:` segment. |
 | `M-x dimfort-restart`            | Restart the language server.                    |
 | `M-x dimfort-status`             | Print current feature toggles in the echo area. |
 | `M-x dimfort-toggle-inlay-hints` | Toggle inlay hints; restarts the server.        |
@@ -126,11 +126,11 @@ diagnostic, interaction-site, or import row to jump to it
 **Coverage bar**: a footer below the sections shows the active
 file's coverage percentage and tier counts on the left, and the
 whole-workspace aggregate on the right —
-`File: 78% (🟡 18 🔴 2)   WS: 12.9% (🟡 N 🔴 M)`. File-scope
+`File: 78% (🟡 18 🔴 2)   Project: 12.9% (🟡 N 🔴 M)`. File-scope
 updates live on every edit; workspace-scope is populated when you
 run `M-x dimfort-check-workspace`. Pre-refresh the bar shows
-`WS: –`; during a refresh it shows a Braille spinner; once any
-buffer edits fire the WS numbers dim to signal they may no longer
+`Project: –`; during a refresh it shows a Braille spinner; once any
+buffer edits fire the Project numbers dim to signal they may no longer
 reflect current state. Requires DimFort 0.2.5+.
 
 <picture>
