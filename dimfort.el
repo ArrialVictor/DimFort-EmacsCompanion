@@ -1117,6 +1117,22 @@ stale-flag toggle.  No-op when the panel buffer doesn't exist."
     (dimfort--panel-paint
      (dimfort--panel-render dimfort--panel-last-payload) nil)))
 
+(defun dimfort--fmt-count (n)
+  "Format a count N for the footer bar's parenthetical 🟡 / 🔴 counts.
+Three-tier abbreviation chosen so big projects (e.g. 50k+ U-diags at
+workspace scale on a real-world codebase) don't blow the footer width:
+
+  <= 999      -> full integer (\"52\", \"999\")        -- actionable detail
+  1000-9999   -> one decimal kilo (\"1.2k\", \"9.9k\") -- order-of-magnitude
+  10000+      -> integer kilo (\"12k\", \"100k\")      -- coarse signal
+
+Matches the GitHub-stars / Twitter-followers conventions; familiar
+enough that no in-bar legend is needed."
+  (cond
+   ((<= n 999) (number-to-string n))
+   ((< n 10000) (format "%.1fk" (/ n 1000.0)))
+   (t (format "%dk" (/ n 1000)))))
+
 (defun dimfort--panel-render-footer ()
   "Return the footer cells for the workspace + file coverage bar.
 Always returns at least the divider + bar row so the footer is
@@ -1124,10 +1140,10 @@ visible regardless of payload state."
   (let* ((file-uri (dimfort--coverage-active-uri))
          (file (and file-uri (gethash file-uri dimfort--file-coverage-cache)))
          (file-text (if file
-                        (format "File: %d%% (🟡 %d 🔴 %d)"
+                        (format "File: %d%% (🟡 %s 🔴 %s)"
                                 (plist-get file :coverage-pct)
-                                (plist-get file :warn)
-                                (plist-get file :fire))
+                                (dimfort--fmt-count (plist-get file :warn))
+                                (dimfort--fmt-count (plist-get file :fire)))
                       (dimfort--dim "File: –")))
          (ws-text (cond
                    (dimfort--ws-refreshing
@@ -1136,10 +1152,12 @@ visible regardless of payload state."
                    ((null dimfort--ws-snapshot)
                     (dimfort--dim "Project: –"))
                    (t
-                    (let ((s (format "Project: %d%% (🟡 %d 🔴 %d)"
+                    (let ((s (format "Project: %d%% (🟡 %s 🔴 %s)"
                                      (plist-get dimfort--ws-snapshot :coverage-pct)
-                                     (plist-get dimfort--ws-snapshot :warn)
-                                     (plist-get dimfort--ws-snapshot :fire))))
+                                     (dimfort--fmt-count
+                                      (plist-get dimfort--ws-snapshot :warn))
+                                     (dimfort--fmt-count
+                                      (plist-get dimfort--ws-snapshot :fire)))))
                       (if dimfort--ws-stale (dimfort--dim s) s))))))
     (list (dimfort--cell dimfort--panel-divider)
           (dimfort--cell (concat file-text "   " ws-text)))))
