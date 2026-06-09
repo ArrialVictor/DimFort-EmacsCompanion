@@ -480,6 +480,15 @@ Also schedules a delayed inlay-hint re-request, since eglot
 ignores `workspace/inlayHint/refresh' and would otherwise
 leave the buffer with the pre-restart hint cache."
   (interactive)
+  ;; Reset workspace-bar state — the prior server's cached coverage
+  ;; payload and any in-flight spinner do not survive the restart.
+  ;; Mirrors the Nvim companion's stats.reset() pattern.
+  (dimfort--ws-stop-spinner)
+  (setq dimfort--ws-snapshot nil
+        dimfort--ws-stale nil
+        dimfort--ws-refreshing nil)
+  (clrhash dimfort--file-coverage-cache)
+  (dimfort--panel-repaint)
   (cond
    ((and (featurep 'lsp-mode) (fboundp 'lsp-workspace-restart)
          (fboundp 'lsp-find-workspace))

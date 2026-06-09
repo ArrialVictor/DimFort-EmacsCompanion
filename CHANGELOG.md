@@ -10,6 +10,14 @@ defaults, packaging).
 
 ## [Unreleased]
 
+### Recommended server version
+
+Pair this companion with DimFort **0.2.5+**. The workspace bar listens
+for the new server-fired `dimfort/workspaceCheckCompleted` notification
+(introduced by DimFort 0.2.5's async workspace check refactor) on both
+the eglot and lsp-mode paths. Earlier servers don't emit it; the bar
+would stay on the spinner state forever after a refresh trigger.
+
 ### Added
 
 - **Workspace coverage bar** — side-panel footer now renders a

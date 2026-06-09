@@ -407,7 +407,28 @@ out as point moves.
       with point between the braces. Point anywhere on line 26 (the H010
       line) → **• Extract literal '273.15' into a named PARAMETER (s)**;
       `RET` prompts for a name and applies the refactor.
-- [ ] **Footer** — the panel's last line reads `File: 🔴 N   🟡 N`.
+- [ ] **Footer (coverage bar)** — the panel's last line reads
+      `File: <pct>% (🟡 N 🔴 M)   WS: …` with the active file's
+      coverage on the left and the whole-workspace aggregate on
+      the right.
+- [ ] **WS pre-refresh state** — before the first manual
+      workspace check, the WS segment reads `WS: –` (dimmed).
+- [ ] **Workspace check** — run `M-x dimfort-check-workspace`.
+      The WS segment becomes a Braille spinner
+      (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) for the duration of the server-side
+      check, then settles to `WS: <pct>% (🟡 N 🔴 M)` when the
+      `dimfort/workspaceCheckCompleted` notification arrives.
+- [ ] **WS stale state** — after a successful check, edit any
+      Fortran buffer. The WS segment dims (the snapshot may no
+      longer reflect current state). The File segment updates
+      live.
+- [ ] **Duplicate trigger** — run `M-x dimfort-check-workspace`
+      twice in quick succession. The second invocation prints
+      "DimFort: workspace check already in progress" to the echo
+      area instead of spawning a second worker.
+- [ ] **Restart clears state** — `M-x dimfort-restart` resets
+      the bar back to `File: –   WS: –` (dimmed) and clears the
+      file-coverage cache; the next workspace check re-populates.
 
 ### Panel — Scope filter
 
