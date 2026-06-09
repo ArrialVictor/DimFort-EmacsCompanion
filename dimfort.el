@@ -530,16 +530,22 @@ leave the buffer with the pre-restart hint cache."
                   (lsp-workspaces))))))
 
 (defun dimfort--restart-wait-and-refresh (deadline)
-  "Poll until an LSP server is reachable, then refresh the panel once.
-DEADLINE is a `float-time' cutoff; give up silently after it."
+  "Poll until an LSP server is reachable, then refresh once.
+Refreshes both the panel (so the cursor-position analysis populates
+against the new server) and the file-coverage stats for the source
+buffer (so the footer's File: segment doesn't keep the prior
+server's numbers).  DEADLINE is a `float-time' cutoff; give up
+silently after it."
   (let ((buf dimfort--panel-source-buffer))
     (cond
      ((and buf (dimfort--restart-have-server-p buf))
-      ;; The request has to fire from the source buffer so the
-      ;; cursor position picked up by `dimfort--panel-position-params'
-      ;; reads from the right buffer-local state.
       (with-current-buffer buf
-        (ignore-errors (dimfort--panel-refresh))))
+        ;; Panel: cursor-position params + dimfort/panelInfo request.
+        (ignore-errors (dimfort--panel-refresh))
+        ;; File-coverage stats: refresh active-file's footer File:
+        ;; segment.  Without this, the segment carries the prior
+        ;; server's numbers until the user edits the buffer.
+        (ignore-errors (dimfort--coverage-stats-refresh-active))))
      ((< (float-time) deadline)
       (run-at-time 0.3 nil #'dimfort--restart-wait-and-refresh deadline))
      (t nil))))
