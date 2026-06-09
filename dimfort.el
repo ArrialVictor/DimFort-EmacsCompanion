@@ -959,7 +959,7 @@ Order: disabled → gutter → background → disabled.  Companion-only
 ;;   2. Scope — declarations of every enclosing scope, stacked
 ;;      outermost-first, each variable marked 🟢 / 🟡 / 🔴.
 ;; Driven by the custom `dimfort/panelInfo' LSP request (see
-;; DimFort/docs/design/panel-info.md). Closed by default; open it with
+;; DimFort/docs/design/shipped/panel-info.md). Closed by default; open it with
 ;; `dimfort-panel-toggle'.
 
 (declare-function jsonrpc-async-request "jsonrpc")
