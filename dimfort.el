@@ -1163,37 +1163,49 @@ Updates `dimfort--file-coverage-cache' on response and repaints."
          :mode 'tick))))))
 
 (defun dimfort--coverage-stats-store (uri result)
-  "Cache the file-scope coverage RESULT for URI and repaint the panel.
-
-When the server returns an empty `files' array (mid-check, file not
-yet added to the workset, …) we LEAVE the cache as-is rather than
-clearing it.  Clearing on empty caused the footer to flash between
-populated and empty whenever a stats request raced a fresh check —
-the next populated response would refill, the next empty one would
-re-clear, and so on.  Stale-but-stable beats flickering."
+  "Cache the file-scope coverage RESULT for URI and repaint the panel."
   (let ((files (or (and (hash-table-p result) (gethash "files" result))
                    (plist-get result :files))))
-    (when (and files (> (length files) 0))
+    (cond
+     ((or (null files) (zerop (length files)))
+      (remhash uri dimfort--file-coverage-cache))
+     (t
       (let ((row (if (vectorp files) (aref files 0) (car files))))
         (when row
           (puthash uri (dimfort--coverage-from-row row)
-                   dimfort--file-coverage-cache)))))
+                   dimfort--file-coverage-cache))))))
   (dimfort--panel-repaint))
 
 (defun dimfort--coverage-active-uri ()
-  "Return the URI of the currently active Fortran buffer, or nil."
-  (when (memq major-mode dimfort-fortran-modes)
-    (dimfort--coverage-uri)))
+  "Return the URI of the panel's source Fortran buffer, or nil.
+
+Reads `dimfort--panel-source-buffer' (the explicitly-tracked buffer
+the panel is following) rather than `current-buffer'.  The footer
+re-renders from multiple contexts (cursor moves, stats notifications,
+workspace check completion …) and `current-buffer' is not reliable
+across them — using it caused the footer to flash between populated
+and empty depending on which event triggered the repaint."
+  (let ((buf (or dimfort--panel-source-buffer (current-buffer))))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf
+                 (memq major-mode dimfort-fortran-modes)))
+      (with-current-buffer buf
+        (dimfort--coverage-uri)))))
 
 (defun dimfort--panel-repaint ()
   "Repaint the panel buffer from the cached last payload.
 Thin wrapper that re-renders cells using `dimfort--panel-last-payload'
 and the current footer state without sending any LSP request — used
 by the workspace coverage bar's spinner, notification handler, and
-stale-flag toggle.  No-op when the panel buffer doesn't exist."
+stale-flag toggle.  No-op when the panel buffer doesn't exist.
+
+Also re-renders the *DimFort Coverage* report buffer when it's open
+so the report tracks live state without any race-prone delays."
   (when (get-buffer dimfort--panel-buffer)
     (dimfort--panel-paint
-     (dimfort--panel-render dimfort--panel-last-payload) nil)))
+     (dimfort--panel-render dimfort--panel-last-payload) nil))
+  (when (get-buffer "*DimFort Coverage*")
+    (dimfort--coverage-report-on-change)))
 
 (defun dimfort--fmt-count (n)
   "Format a count N for the footer bar's parenthetical 🟡 / 🔴 counts.
@@ -2108,73 +2120,97 @@ Applies to both Scope and Imports. Repaints from the cached payload."
       (dimfort--panel-repaint))))
 
 ;;;###autoload
+(defvar dimfort--coverage-report-source-buffer nil
+  "Source Fortran buffer the *DimFort Coverage* report is rendering.
+Tracked so the auto-refresh hook can re-render the report when the
+source's file-coverage cache updates asynchronously.")
+
+(defun dimfort--coverage-report-render (file-uri)
+  "Rebuild the *DimFort Coverage* buffer contents from current state."
+  (let* ((file (and file-uri (gethash file-uri dimfort--file-coverage-cache)))
+         (ws dimfort--ws-snapshot)
+         (stale dimfort--ws-stale)
+         (buf (get-buffer "*DimFort Coverage*")))
+    (when (buffer-live-p buf)
+      (cl-labels
+          ((cell (scope key)
+             (if scope
+                 (format "%5d" (or (plist-get scope key) 0))
+               "  –  "))
+           (pct (scope)
+             (if scope
+                 (format "%4d%%" (or (plist-get scope :coverage-pct) 0))
+               "  –  ")))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t)
+                (saved-point (point)))
+            (erase-buffer)
+            (insert "DimFort coverage\n\n")
+            (insert (format "                %-10s%s\n"
+                            "File"
+                            (if (and ws stale) "Project (stale)" "Project")))
+            (insert (make-string 38 ?─) "\n")
+            (insert (format "  Coverage      %-10s%s\n"
+                            (pct file) (pct ws)))
+            (insert (format "🟢 Verified     %-10s%s\n"
+                            (cell file :ok) (cell ws :ok)))
+            (insert (format "🟡 Unverified   %-10s%s\n"
+                            (cell file :warn) (cell ws :warn)))
+            (insert (format "🔴 Violation    %-10s%s\n"
+                            (cell file :fire) (cell ws :fire)))
+            (insert (format "🔵 Unparsed     %-10s%s\n"
+                            (cell file :unparsed) (cell ws :unparsed)))
+            (cond
+             ((not ws)
+              (insert "\nProject coverage not yet computed.\n")
+              (insert "Run M-x dimfort-refresh-workspace to compute.\n"))
+             (stale
+              (insert "\nFiles changed since last refresh.\n")
+              (insert "Run M-x dimfort-refresh-workspace to update.\n")))
+            (insert "\nPress q to close.\n")
+            (goto-char (min saved-point (point-max)))))))))
+
+(defun dimfort--coverage-report-on-change ()
+  "Hook called when stats change while the coverage report is open.
+Re-renders the report if its source buffer is still alive."
+  (when (and (get-buffer "*DimFort Coverage*")
+             (buffer-live-p dimfort--coverage-report-source-buffer))
+    (let ((uri (with-current-buffer dimfort--coverage-report-source-buffer
+                 (and (memq major-mode dimfort-fortran-modes)
+                      (dimfort--coverage-uri)))))
+      (dimfort--coverage-report-render uri))))
+
+;;;###autoload
 (defun dimfort-coverage-report ()
   "Open a buffer with the File / Project tier breakdown.
 Mirrors the VSCompanion status-bar tooltip table — Verified /
 Unverified / Violation / Unparsed counts for both scopes plus the
 coverage %.  Press `q' to close.
 
-Triggers a fresh `dimfort/coverageStats' for the active buffer so the
-File column populates even when the user hasn't edited yet (the
-cache otherwise only fills on `after-change-functions').  Workspace
-numbers come from the last `dimfort/workspaceCheckCompleted'
-notification — run M-x dimfort-refresh-workspace if the Project
-column reads \"–\"."
+The report re-renders automatically whenever the cached stats update,
+so the File column populates as soon as the LSP response lands —
+no race, no manual re-invocation."
   (interactive)
-  ;; Kick off a fresh file-stats request so the File column populates
-  ;; even on a freshly-opened buffer with no edits yet.  ``sit-for``
-  ;; yields to the LSP message pump so the response can land before
-  ;; we read the cache; without it the first invocation shows "–"
-  ;; because the LSP response races our render.
+  ;; Track the source buffer explicitly so the async re-render hook
+  ;; can find it later (current-buffer changes when we pop to the
+  ;; report buffer).
+  (setq dimfort--coverage-report-source-buffer (current-buffer))
+  ;; Kick off a fresh file-stats request. The response will fire
+  ;; dimfort--panel-repaint, which re-renders this buffer via the
+  ;; dimfort--coverage-report-on-change hook installed in
+  ;; dimfort--panel-repaint. No race, no sit-for, no manual reload.
   (ignore-errors (dimfort--coverage-stats-refresh-active))
-  (sit-for 0.3)
-  (let* ((file-uri (dimfort--coverage-active-uri))
-         (file (and file-uri (gethash file-uri dimfort--file-coverage-cache)))
-         (ws dimfort--ws-snapshot)
-         (stale dimfort--ws-stale)
-         (buf (get-buffer-create "*DimFort Coverage*")))
-    (cl-labels
-        ((cell (scope key)
-           (if scope
-               (format "%5d" (or (plist-get scope key) 0))
-             "  –  "))
-         (pct (scope)
-           (if scope
-               (format "%4d%%" (or (plist-get scope :coverage-pct) 0))
-             "  –  ")))
-      (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert "DimFort coverage\n\n")
-          (insert (format "                %-10s%s\n"
-                          "File"
-                          (if (and ws stale) "Project (stale)" "Project")))
-          (insert (make-string 38 ?─) "\n")
-          (insert (format "  Coverage      %-10s%s\n"
-                          (pct file) (pct ws)))
-          (insert (format "🟢 Verified     %-10s%s\n"
-                          (cell file :ok) (cell ws :ok)))
-          (insert (format "🟡 Unverified   %-10s%s\n"
-                          (cell file :warn) (cell ws :warn)))
-          (insert (format "🔴 Violation    %-10s%s\n"
-                          (cell file :fire) (cell ws :fire)))
-          (insert (format "🔵 Unparsed     %-10s%s\n"
-                          (cell file :unparsed) (cell ws :unparsed)))
-          (cond
-           ((not ws)
-            (insert "\nProject coverage not yet computed.\n")
-            (insert "Run M-x dimfort-refresh-workspace to compute.\n"))
-           (stale
-            (insert "\nFiles changed since last refresh.\n")
-            (insert "Run M-x dimfort-refresh-workspace to update.\n")))
-          (insert "\nPress q to close.\n")
-          (goto-char (point-min)))
-        (special-mode)
-        (local-set-key (kbd "q") #'quit-window))
-      (pop-to-buffer buf
-                     '((display-buffer-in-side-window
-                        (side . bottom)
-                        (window-height . 14)))))))
+  (let ((buf (get-buffer-create "*DimFort Coverage*")))
+    (with-current-buffer buf
+      (special-mode)
+      (local-set-key (kbd "q") #'quit-window))
+    ;; Render once with whatever's currently cached. The async update
+    ;; will re-render as soon as the LSP response lands.
+    (dimfort--coverage-report-render (dimfort--coverage-active-uri))
+    (pop-to-buffer buf
+                   '((display-buffer-in-side-window
+                      (side . bottom)
+                      (window-height . 14))))))
 
 ;;;###autoload
 (defun dimfort-scope-filter (query)
