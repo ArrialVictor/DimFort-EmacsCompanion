@@ -921,7 +921,17 @@ Wires up the per-buffer refresh trigger and paints once initially."
     (run-at-time 1.5 nil
                  (lambda ()
                    (when (buffer-live-p (current-buffer))
-                     (dimfort--coverage-request))))))
+                     (dimfort--coverage-request)))))
+  ;; Prime the footer's File stats unconditionally — independent of
+  ;; the coverage-layer feature toggle. Without this, the footer's
+  ;; ``File:`` cell stays ``–`` on a freshly-opened buffer until the
+  ;; user makes their first edit (after-change-functions is the only
+  ;; other trigger). 1.5 s defer same as the gutter path so the
+  ;; first server check has time to complete.
+  (run-at-time 1.5 nil
+               (lambda ()
+                 (when (buffer-live-p (current-buffer))
+                   (dimfort--coverage-stats-refresh-active)))))
 
 (defun dimfort--coverage-refresh-all ()
   "Refresh coverage in every buffer that has a DimFort LSP attached."
@@ -994,6 +1004,23 @@ with `dimfort-panel-toggle'."
   "Which panel sections to show."
   :type '(choice (const both) (const expression) (const routine)))
 
+(defcustom dimfort-panel-sort-mode "line"
+  "Sort order shared by the panel's Scope and Imports sections.
+\"line\" preserves source order (default).  \"alphabetic\" is a
+case-insensitive name compare.  \"status\" puts errors first, then
+unannotated, then annotated; ties broken by line for Scope and by
+name for Imports.  Cycle via `\\[dimfort-cycle-sort-mode]'."
+  :type '(choice (const "line") (const "alphabetic") (const "status")))
+
+(defcustom dimfort-panel-unit-display-mode "canonical"
+  "Which unit columns the Scope and Imports sections render.
+\"input\" shows only the source unit (e.g. `hPa') — thinnest.
+\"canonical\" shows only the canonical base-SI form (default) — most
+visually consistent across declarations.  \"both\" shows input plus a
+normalized column when it differs (legacy display).  Cycle via
+`\\[dimfort-cycle-unit-display]'."
+  :type '(choice (const "input") (const "canonical") (const "both")))
+
 ;;; Workspace coverage bar — file + workspace stats footer
 ;;
 ;; Mirrors the VSCompanion `CoverageStatsProvider` and the Nvim
@@ -1054,6 +1081,7 @@ Drives the spinner and keeps duplicate triggers coalesced.")
   (list :ok (or (dimfort--field row "ok") 0)
         :warn (or (dimfort--field row "warn") 0)
         :fire (or (dimfort--field row "fire") 0)
+        :unparsed (or (dimfort--field row "unparsed") 0)
         :coverage-pct (or (dimfort--field row "coverage_pct") 0)))
 
 (defun dimfort--ws-stop-spinner ()
@@ -1149,19 +1177,35 @@ Updates `dimfort--file-coverage-cache' on response and repaints."
   (dimfort--panel-repaint))
 
 (defun dimfort--coverage-active-uri ()
-  "Return the URI of the currently active Fortran buffer, or nil."
-  (when (memq major-mode dimfort-fortran-modes)
-    (dimfort--coverage-uri)))
+  "Return the URI of the panel's source Fortran buffer, or nil.
+
+Reads `dimfort--panel-source-buffer' (the explicitly-tracked buffer
+the panel is following) rather than `current-buffer'.  The footer
+re-renders from multiple contexts (cursor moves, stats notifications,
+workspace check completion …) and `current-buffer' is not reliable
+across them — using it caused the footer to flash between populated
+and empty depending on which event triggered the repaint."
+  (let ((buf (or dimfort--panel-source-buffer (current-buffer))))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf
+                 (memq major-mode dimfort-fortran-modes)))
+      (with-current-buffer buf
+        (dimfort--coverage-uri)))))
 
 (defun dimfort--panel-repaint ()
   "Repaint the panel buffer from the cached last payload.
 Thin wrapper that re-renders cells using `dimfort--panel-last-payload'
 and the current footer state without sending any LSP request — used
 by the workspace coverage bar's spinner, notification handler, and
-stale-flag toggle.  No-op when the panel buffer doesn't exist."
+stale-flag toggle.  No-op when the panel buffer doesn't exist.
+
+Also re-renders the *DimFort Coverage* report buffer when it's open
+so the report tracks live state without any race-prone delays."
   (when (get-buffer dimfort--panel-buffer)
     (dimfort--panel-paint
-     (dimfort--panel-render dimfort--panel-last-payload) nil)))
+     (dimfort--panel-render dimfort--panel-last-payload) nil))
+  (when (get-buffer "*DimFort Coverage*")
+    (dimfort--coverage-report-on-change)))
 
 (defun dimfort--fmt-count (n)
   "Format a count N for the footer bar's parenthetical 🟡 / 🔴 counts.
@@ -1341,6 +1385,85 @@ PREFIX is the tree-drawing prefix; IS-LAST / IS-ROOT shape the connector."
               rows)))
     (nreverse rows)))
 
+(defun dimfort--panel-status-rank (kind)
+  "Return a numeric rank used by the \"status\" sort mode."
+  (cond ((equal kind "error") 0)
+        ((equal kind "unannotated") 1)
+        (t 2)))
+
+(defun dimfort--panel-sort-scope-vars (vars)
+  "Return VARS sorted per `dimfort-panel-sort-mode'.
+Returns a fresh list so the server-supplied vector stays untouched."
+  (let ((out (copy-sequence (append vars nil))))
+    (cond
+     ((equal dimfort-panel-sort-mode "alphabetic")
+      (sort out (lambda (a b)
+                  (string< (downcase (or (dimfort--field a "name") ""))
+                           (downcase (or (dimfort--field b "name") ""))))))
+     ((equal dimfort-panel-sort-mode "status")
+      (sort out (lambda (a b)
+                  (let ((ra (dimfort--panel-status-rank (dimfort--field a "kind")))
+                        (rb (dimfort--panel-status-rank (dimfort--field b "kind"))))
+                    (if (= ra rb)
+                        (< (or (dimfort--field a "line") 0)
+                           (or (dimfort--field b "line") 0))
+                      (< ra rb))))))
+     (t  ;; "line" — the default
+      (sort out (lambda (a b)
+                  (< (or (dimfort--field a "line") 0)
+                     (or (dimfort--field b "line") 0))))))))
+
+(defun dimfort--panel-sort-imports-vars (vars)
+  "Sort imports rows VARS within a module group per `dimfort-panel-sort-mode'.
+Tie-breaks by name rather than line — Imports don't always carry a
+meaningful per-row line beyond the `use' statement."
+  (let ((out (copy-sequence (append vars nil))))
+    (cond
+     ((equal dimfort-panel-sort-mode "alphabetic")
+      (sort out (lambda (a b)
+                  (string< (downcase (or (dimfort--field a "name") ""))
+                           (downcase (or (dimfort--field b "name") ""))))))
+     ((equal dimfort-panel-sort-mode "status")
+      (sort out (lambda (a b)
+                  (let ((ra (if (equal (dimfort--field a "kind") "unannotated") 0 1))
+                        (rb (if (equal (dimfort--field b "kind") "unannotated") 0 1)))
+                    (if (= ra rb)
+                        (string< (downcase (or (dimfort--field a "name") ""))
+                                 (downcase (or (dimfort--field b "name") "")))
+                      (< ra rb))))))
+     (t  ;; "line"
+      (sort out (lambda (a b)
+                  (< (or (dimfort--field a "line") 0)
+                     (or (dimfort--field b "line") 0))))))))
+
+(defun dimfort--panel-shown-unit (v)
+  "Return the unit string for row V per `dimfort-panel-unit-display-mode'.
+Canonical falls back to the input unit when the server didn't emit a
+normalised form — meaning the input is already canonical."
+  (let ((src (dimfort--field v "unit"))
+        (norm (dimfort--field v "unitNormalized")))
+    (cond
+     ((equal dimfort-panel-unit-display-mode "canonical")
+      (or norm src "?"))
+     (t (or src "?")))))
+
+(defun dimfort--panel-shown-import-unit (im)
+  "Return the unit string for import row IM per `dimfort-panel-unit-display-mode'.
+Canonical mode falls back to input when the server has no normalised
+form.  Annotated callables with no unit (subroutines) read as \"-\"."
+  (let* ((src (dimfort--field im "unit"))
+         (norm (dimfort--field im "unitNormalized")))
+    (cond
+     ((equal dimfort-panel-unit-display-mode "canonical")
+      (or norm src
+          (if (and (eq (dimfort--field im "callable") t)
+                   (equal (dimfort--field im "kind") "annotated"))
+              "-" "?")))
+     (t (or src
+            (if (and (eq (dimfort--field im "callable") t)
+                     (equal (dimfort--field im "kind") "annotated"))
+                "-" "?"))))))
+
 (defun dimfort--panel-var-matches (v query)
   "Non-nil when var V's name or unit contains QUERY (case-insensitive)."
   (or (string-empty-p query)
@@ -1365,26 +1488,29 @@ Each variable row carries a jump target to its declaration line."
     (push (dimfort--cell "") rows)
     (if (null vs)
         (push (dimfort--cell (dimfort--dim (concat pad "  (no declarations)"))) rows)
-      (let ((name-w 4) (unit-w 4) (norm-w 0))
+      ;; Sort BEFORE width computation so column widths reflect the
+      ;; rendered order. Unit-display mode also drives width: in
+      ;; canonical mode the displayed string is the canonical form.
+      (setq vs (dimfort--panel-sort-scope-vars vs))
+      (let ((name-w 4) (unit-w 4) (norm-w 0)
+            (both-p (equal dimfort-panel-unit-display-mode "both")))
         (dolist (v vs)
           (setq name-w (max name-w (string-width (or (dimfort--field v "name") ""))))
-          (setq unit-w (max unit-w (string-width (or (dimfort--field v "unit") "?"))))
-          ;; Normalized column: base-SI expansion (and, in scale mode,
-          ;; the scale factor — server already encodes the mode-aware
-          ;; rendering in ``unitNormalized``). Shown only on rows whose
-          ;; normalized form differs from the source unit; other rows
-          ;; pad-blank to keep markers aligned.
-          (let ((norm (dimfort--field v "unitNormalized"))
-                (src  (dimfort--field v "unit")))
-            (when (and norm (not (equal norm src)))
-              (setq norm-w (max norm-w (string-width norm))))))
+          (setq unit-w (max unit-w (string-width (dimfort--panel-shown-unit v))))
+          ;; Normalized column: only meaningful in "both" mode; shown
+          ;; on rows whose normalized form differs from the source.
+          (when both-p
+            (let ((norm (dimfort--field v "unitNormalized"))
+                  (src  (dimfort--field v "unit")))
+              (when (and norm (not (equal norm src)))
+                (setq norm-w (max norm-w (string-width norm)))))))
         ;; Two-space gap between source-unit and normalized columns
         ;; matches the side-by-side ``<td>`` convention used by the
         ;; VSCode panel — no arrow / separator glyph (column spacing
         ;; already conveys the second cell).
         (let ((norm-block-w (if (> norm-w 0) norm-w 0)))
           (dolist (v vs)
-            (let* ((unit (or (dimfort--field v "unit") "?"))
+            (let* ((unit (dimfort--panel-shown-unit v))
                    (kind (dimfort--field v "kind"))
                    (line (or (dimfort--field v "line") 0))
                    (tail (cond ((equal kind "unannotated") " 🟡")
@@ -1396,11 +1522,14 @@ Each variable row carries a jump target to its declaration line."
                    (unit-cell (if (member unit '("?" "-"))
                                   (dimfort--dim unit-padded)
                                 unit-padded))
+                   ;; Only used in "both" mode (norm-block-w == 0 in
+                   ;; input/canonical modes so the block is skipped).
                    (norm (dimfort--field v "unitNormalized"))
+                   (src  (dimfort--field v "unit"))
                    (norm-block
                     (cond
                      ((zerop norm-block-w) "")
-                     ((and norm (not (equal norm unit)))
+                     ((and norm (not (equal norm src)))
                       (concat "  " norm
                               (make-string (- norm-w (string-width norm)) ?\s)))
                      (t (concat "  " (make-string norm-block-w ?\s))))))
@@ -1587,26 +1716,22 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
             (puthash m (cons im (gethash m groups)) groups)))
         (dolist (m (nreverse order))
           (push (dimfort--cell (concat "  from " m)) rows)
-          (let ((items (nreverse (gethash m groups)))
-                (name-w 4) (unit-w 4) (norm-w 0))
+          ;; Sort within the module group; module headers stay in
+          ;; source ``use``-order regardless.
+          (let ((items (dimfort--panel-sort-imports-vars (nreverse (gethash m groups))))
+                (name-w 4) (unit-w 4) (norm-w 0)
+                (both-p (equal dimfort-panel-unit-display-mode "both")))
             (dolist (im items)
               (setq name-w (max name-w (string-width (dimfort--import-label im))))
-              (setq unit-w (max unit-w
-                                (string-width (or (dimfort--field im "unit") "?"))))
-              (let ((norm (dimfort--field im "unitNormalized"))
-                    (src  (dimfort--field im "unit")))
-                (when (and norm (not (equal norm src)))
-                  (setq norm-w (max norm-w (string-width norm))))))
+              (setq unit-w (max unit-w (string-width (dimfort--panel-shown-import-unit im))))
+              (when both-p
+                (let ((norm (dimfort--field im "unitNormalized"))
+                      (src  (dimfort--field im "unit")))
+                  (when (and norm (not (equal norm src)))
+                    (setq norm-w (max norm-w (string-width norm)))))))
             (let ((norm-block-w (if (> norm-w 0) norm-w 0)))
               (dolist (im items)
-                ;; A subroutine (callable, no unit, not a missing
-                ;; annotation) reads as "-" (structural-no-unit) rather
-                ;; than "?" — it has no return value to annotate.
-                ;; Unannotated declarations get "?" (unknown).
-                (let* ((unit (or (dimfort--field im "unit")
-                                 (if (and (eq (dimfort--field im "callable") t)
-                                          (equal (dimfort--field im "kind") "annotated"))
-                                     "-" "?")))
+                (let* ((unit (dimfort--panel-shown-import-unit im))
                        (tail (if (equal (dimfort--field im "kind") "unannotated")
                                  " 🟡" " 🟢"))
                        ;; Dim absence-of-information glyphs so real units pop.
@@ -1615,10 +1740,11 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
                                       (dimfort--dim unit-padded)
                                     unit-padded))
                        (norm (dimfort--field im "unitNormalized"))
+                       (src  (dimfort--field im "unit"))
                        (norm-block
                         (cond
                          ((zerop norm-block-w) "")
-                         ((and norm (not (equal norm unit)))
+                         ((and norm (not (equal norm src)))
                           (concat "  " norm
                                   (make-string (- norm-w (string-width norm)) ?\s)))
                          (t (concat "  " (make-string norm-block-w ?\s)))))
@@ -1656,6 +1782,10 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
         (add (dimfort--cell dimfort--panel-divider) (dimfort--cell "")))
       (when (memq dimfort-panel-layout '(both routine))
         (sec "Scope" (dimfort--panel-render-scope-section payload))
+        ;; Divider between Scope and Imports matches the visual
+        ;; treatment around Actions/Scope and Imports/Footer, and
+        ;; mirrors the per-view boundary in the multi-view VSCompanion.
+        (add (dimfort--cell dimfort--panel-divider) (dimfort--cell ""))
         (sec "Imports"
              (dimfort--panel-render-imports
               (and payload (dimfort--field payload "imports")))))
@@ -1960,6 +2090,126 @@ populate the Interactions and Actions sections). Each response repaints."
   (if (dimfort--panel-window)
       (dimfort-panel-close)
     (dimfort-panel-open)))
+
+;;;###autoload
+(defun dimfort-cycle-sort-mode ()
+  "Cycle `dimfort-panel-sort-mode' through line → alphabetic → status.
+Shared by the panel's Scope and Imports sections so the two stay in
+sync (matches the VSCompanion / Nvim companions). Repaints from the
+cached payload — no LSP round-trip."
+  (interactive)
+  (let* ((vals '("line" "alphabetic" "status"))
+         (pos (or (cl-position dimfort-panel-sort-mode vals :test #'equal) -1))
+         (next (nth (mod (1+ pos) (length vals)) vals)))
+    (setq dimfort-panel-sort-mode next)
+    (message "DimFort: sort mode → %s" next)
+    (when (get-buffer dimfort--panel-buffer)
+      (dimfort--panel-repaint))))
+
+;;;###autoload
+(defun dimfort-cycle-unit-display ()
+  "Cycle `dimfort-panel-unit-display-mode' through input → canonical → both.
+Applies to both Scope and Imports. Repaints from the cached payload."
+  (interactive)
+  (let* ((vals '("input" "canonical" "both"))
+         (pos (or (cl-position dimfort-panel-unit-display-mode vals :test #'equal) -1))
+         (next (nth (mod (1+ pos) (length vals)) vals)))
+    (setq dimfort-panel-unit-display-mode next)
+    (message "DimFort: unit display → %s" next)
+    (when (get-buffer dimfort--panel-buffer)
+      (dimfort--panel-repaint))))
+
+(defvar dimfort--coverage-report-source-buffer nil
+  "Source Fortran buffer the *DimFort Coverage* report is rendering.
+Tracked so the auto-refresh hook can re-render the report when the
+source's file-coverage cache updates asynchronously.")
+
+(defun dimfort--coverage-report-render (file-uri)
+  "Rebuild the *DimFort Coverage* buffer contents from current state."
+  (let* ((file (and file-uri (gethash file-uri dimfort--file-coverage-cache)))
+         (ws dimfort--ws-snapshot)
+         (stale dimfort--ws-stale)
+         (buf (get-buffer "*DimFort Coverage*")))
+    (when (buffer-live-p buf)
+      (cl-labels
+          ((cell (scope key)
+             (if scope
+                 (format "%5d" (or (plist-get scope key) 0))
+               "  –  "))
+           (pct (scope)
+             (if scope
+                 (format "%4d%%" (or (plist-get scope :coverage-pct) 0))
+               "  –  ")))
+        (with-current-buffer buf
+          (let ((inhibit-read-only t)
+                (saved-point (point)))
+            (erase-buffer)
+            (insert "DimFort coverage\n\n")
+            (insert (format "                %-10s%s\n"
+                            "File"
+                            (if (and ws stale) "Project (stale)" "Project")))
+            (insert (make-string 38 ?─) "\n")
+            (insert (format "  Coverage      %-10s%s\n"
+                            (pct file) (pct ws)))
+            (insert (format "🟢 Verified     %-10s%s\n"
+                            (cell file :ok) (cell ws :ok)))
+            (insert (format "🟡 Unverified   %-10s%s\n"
+                            (cell file :warn) (cell ws :warn)))
+            (insert (format "🔴 Violation    %-10s%s\n"
+                            (cell file :fire) (cell ws :fire)))
+            (insert (format "🔵 Unparsed     %-10s%s\n"
+                            (cell file :unparsed) (cell ws :unparsed)))
+            (cond
+             ((not ws)
+              (insert "\nProject coverage not yet computed.\n")
+              (insert "Run M-x dimfort-refresh-workspace to compute.\n"))
+             (stale
+              (insert "\nFiles changed since last refresh.\n")
+              (insert "Run M-x dimfort-refresh-workspace to update.\n")))
+            (insert "\nPress q to close.\n")
+            (goto-char (min saved-point (point-max)))))))))
+
+(defun dimfort--coverage-report-on-change ()
+  "Hook called when stats change while the coverage report is open.
+Re-renders the report if its source buffer is still alive."
+  (when (and (get-buffer "*DimFort Coverage*")
+             (buffer-live-p dimfort--coverage-report-source-buffer))
+    (let ((uri (with-current-buffer dimfort--coverage-report-source-buffer
+                 (and (memq major-mode dimfort-fortran-modes)
+                      (dimfort--coverage-uri)))))
+      (dimfort--coverage-report-render uri))))
+
+;;;###autoload
+(defun dimfort-coverage-report ()
+  "Open a buffer with the File / Project tier breakdown.
+Mirrors the VSCompanion status-bar tooltip table — Verified /
+Unverified / Violation / Unparsed counts for both scopes plus the
+coverage %.  Press `q' to close.
+
+The report re-renders automatically whenever the cached stats update,
+so the File column populates as soon as the LSP response lands —
+no race, no manual re-invocation."
+  (interactive)
+  ;; Track the source buffer explicitly so the async re-render hook
+  ;; can find it later (current-buffer changes when we pop to the
+  ;; report buffer).
+  (setq dimfort--coverage-report-source-buffer (current-buffer))
+  ;; Kick off a fresh file-stats request. The response will fire
+  ;; dimfort--panel-repaint, which re-renders this buffer via the
+  ;; dimfort--coverage-report-on-change hook installed in
+  ;; dimfort--panel-repaint. No race, no sit-for, no manual reload.
+  (ignore-errors (dimfort--coverage-stats-refresh-active))
+  (let ((buf (get-buffer-create "*DimFort Coverage*")))
+    (with-current-buffer buf
+      (special-mode)
+      (local-set-key (kbd "q") #'quit-window))
+    ;; Render once with whatever's currently cached. The async update
+    ;; will re-render as soon as the LSP response lands.
+    (dimfort--coverage-report-render (dimfort--coverage-active-uri))
+    (pop-to-buffer buf
+                   '((display-buffer-in-side-window
+                      (side . bottom)
+                      (window-height . 14))))))
 
 ;;;###autoload
 (defun dimfort-scope-filter (query)
