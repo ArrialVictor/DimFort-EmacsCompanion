@@ -1163,17 +1163,21 @@ Updates `dimfort--file-coverage-cache' on response and repaints."
          :mode 'tick))))))
 
 (defun dimfort--coverage-stats-store (uri result)
-  "Cache the file-scope coverage RESULT for URI and repaint the panel."
+  "Cache the file-scope coverage RESULT for URI and repaint the panel.
+
+When the server returns an empty `files' array (mid-check, file not
+yet added to the workset, …) we LEAVE the cache as-is rather than
+clearing it.  Clearing on empty caused the footer to flash between
+populated and empty whenever a stats request raced a fresh check —
+the next populated response would refill, the next empty one would
+re-clear, and so on.  Stale-but-stable beats flickering."
   (let ((files (or (and (hash-table-p result) (gethash "files" result))
                    (plist-get result :files))))
-    (cond
-     ((or (null files) (zerop (length files)))
-      (remhash uri dimfort--file-coverage-cache))
-     (t
+    (when (and files (> (length files) 0))
       (let ((row (if (vectorp files) (aref files 0) (car files))))
         (when row
           (puthash uri (dimfort--coverage-from-row row)
-                   dimfort--file-coverage-cache))))))
+                   dimfort--file-coverage-cache)))))
   (dimfort--panel-repaint))
 
 (defun dimfort--coverage-active-uri ()
