@@ -921,7 +921,17 @@ Wires up the per-buffer refresh trigger and paints once initially."
     (run-at-time 1.5 nil
                  (lambda ()
                    (when (buffer-live-p (current-buffer))
-                     (dimfort--coverage-request))))))
+                     (dimfort--coverage-request)))))
+  ;; Prime the footer's File stats unconditionally — independent of
+  ;; the coverage-layer feature toggle. Without this, the footer's
+  ;; ``File:`` cell stays ``–`` on a freshly-opened buffer until the
+  ;; user makes their first edit (after-change-functions is the only
+  ;; other trigger). 1.5 s defer same as the gutter path so the
+  ;; first server check has time to complete.
+  (run-at-time 1.5 nil
+               (lambda ()
+                 (when (buffer-live-p (current-buffer))
+                   (dimfort--coverage-stats-refresh-active)))))
 
 (defun dimfort--coverage-refresh-all ()
   "Refresh coverage in every buffer that has a DimFort LSP attached."
