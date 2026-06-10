@@ -2098,8 +2098,22 @@ Applies to both Scope and Imports. Repaints from the cached payload."
   "Open a buffer with the File / Project tier breakdown.
 Mirrors the VSCompanion status-bar tooltip table — Verified /
 Unverified / Violation / Unparsed counts for both scopes plus the
-coverage %. Reads cached stats (no LSP request).  Press `q' to close."
+coverage %.  Press `q' to close.
+
+Triggers a fresh `dimfort/coverageStats' for the active buffer so the
+File column populates even when the user hasn't edited yet (the
+cache otherwise only fills on `after-change-functions').  Workspace
+numbers come from the last `dimfort/workspaceCheckCompleted'
+notification — run M-x dimfort-refresh-workspace if the Project
+column reads \"–\"."
   (interactive)
+  ;; Kick off a fresh file-stats request so the File column populates
+  ;; even on a freshly-opened buffer with no edits yet.  ``sit-for``
+  ;; yields to the LSP message pump so the response can land before
+  ;; we read the cache; without it the first invocation shows "–"
+  ;; because the LSP response races our render.
+  (ignore-errors (dimfort--coverage-stats-refresh-active))
+  (sit-for 0.3)
   (let* ((file-uri (dimfort--coverage-active-uri))
          (file (and file-uri (gethash file-uri dimfort--file-coverage-cache)))
          (ws dimfort--ws-snapshot)
