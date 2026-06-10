@@ -2119,7 +2119,6 @@ Applies to both Scope and Imports. Repaints from the cached payload."
     (when (get-buffer dimfort--panel-buffer)
       (dimfort--panel-repaint))))
 
-;;;###autoload
 (defvar dimfort--coverage-report-source-buffer nil
   "Source Fortran buffer the *DimFort Coverage* report is rendering.
 Tracked so the auto-refresh hook can re-render the report when the
