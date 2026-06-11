@@ -73,7 +73,9 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-panel-side`              | `right`     | Panel dock side (`right` / `left` / `bottom`). |
 | `dimfort-panel-width`             | `0.35`      | Panel width fraction (left/right docking). |
 | `dimfort-panel-debounce`          | `0.2`       | Idle seconds before the panel cursor-follow refresh. |
-| `dimfort-panel-layout`            | `both`      | Panel sections (`both` / `expression` / `routine`). |
+| `dimfort-show-cursor`             | `t`         | Show the Cursor section (Expression / Diagnostics / Interactions / Actions). |
+| `dimfort-show-scope`              | `t`         | Show the Scope section. |
+| `dimfort-show-imports`            | `t`         | Show the Imports section. |
 
 ## Commands
 
@@ -87,11 +89,15 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-toggle-code-actions`| Toggle code actions; restarts.                  |
 | `M-x dimfort-toggle-goto-definition` | Toggle go-to-definition; restarts.          |
 | `M-x dimfort-cycle-hover`        | Cycle hover verbosity (disabled → short → detailed); restarts. |
-| `M-x dimfort-toggle-cache`       | Toggle the content-hash cache (off ↔ read-write); restarts. |
+| `M-x dimfort-cycle-cache`        | Cycle the content-hash cache through `off` → `read-only` → `read-write`. |
+| `M-x dimfort-clear-cache`        | Delete the `.dimfort-cache/` directory and restart the server. |
 | `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `.dimfort.toml`. |
 | `M-x dimfort-cycle-coverage`     | Cycle coverage visualisation (`disabled` → `gutter` → `background`); companion-only, no LSP restart. |
-| `M-x dimfort-panel-toggle`       | Toggle the cursor-following side panel. |
+| `M-x dimfort-toggle-panel`       | Toggle the cursor-following side panel. |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
+| `M-x dimfort-toggle-cursor`      | Show / hide the Cursor section (Expression / Diagnostics / Interactions / Actions). |
+| `M-x dimfort-toggle-scope`       | Show / hide the Scope section. |
+| `M-x dimfort-toggle-imports`     | Show / hide the Imports section. |
 | `M-x dimfort-scope-filter`       | Filter the panel's Scope section by name/unit (empty clears). |
 | `M-x dimfort-imports-filter`     | Filter the panel's Imports section by name/unit/module (empty clears). |
 

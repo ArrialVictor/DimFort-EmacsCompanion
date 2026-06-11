@@ -646,16 +646,49 @@ otherwise."
 (dimfort--define-cycle dimfort-cycle-hover
                        dimfort-hover
                        "hover" '("disabled" "short" "detailed"))
-;; Binary cache toggle flips off <-> read-write; the middle read-only
-;; mode is reachable via `M-x customize-variable RET dimfort-cache-mode'.
-(dimfort--define-cycle dimfort-toggle-cache
+;; Content-hash cache cycles all three values (off -> read-only ->
+;; read-write -> off) matching the cache_mode enum's full range and
+;; the cycle-hover / cycle-scale / cycle-coverage shape.
+(dimfort--define-cycle dimfort-cycle-cache
                        dimfort-cache-mode
-                       "cache" '("off" "read-write"))
+                       "cache" '("off" "read-only" "read-write"))
 ;; Scale checking is tri-state: "auto" defers to the project .dimfort.toml,
 ;; "on"/"off" override it for the session.
 (dimfort--define-cycle dimfort-cycle-scale
                        dimfort-scale-mode
                        "scale checking" '("auto" "on" "off"))
+
+;;;###autoload
+(defun dimfort-clear-cache ()
+  "Delete the on-disk content-hash cache directory and restart the server.
+
+Cache dir mirrors the server's resolution: the user's
+`dimfort-cache-dir' setting if non-empty, else `.dimfort-cache/'
+under the first workspace folder.  Cross-companion parity with
+VSCompanion's `dimfort.clearCache' and Nvim's
+`:DimFortClearCache'."
+  (interactive)
+  (let* ((workspace (or (when (and (fboundp 'project-current)
+                                   (fboundp 'project-root))
+                          (when-let ((proj (project-current)))
+                            (project-root proj)))
+                        default-directory))
+         (dir (if (and dimfort-cache-dir
+                       (not (string-empty-p dimfort-cache-dir)))
+                  dimfort-cache-dir
+                (expand-file-name ".dimfort-cache" workspace))))
+    (cond
+     ((not (file-directory-p dir))
+      (message "DimFort: cache directory does not exist (already clean)."))
+     (t
+      (condition-case err
+          (progn
+            (delete-directory dir t)
+            (message "DimFort: cache cleared (%s)" dir))
+        (error
+         (message "DimFort: clear cache failed — %s" (error-message-string err))
+         (signal (car err) (cdr err))))))
+    (dimfort-restart)))
 
 ;;;###autoload
 (defun dimfort-status ()
@@ -970,7 +1003,7 @@ Order: disabled → gutter → background → disabled.  Companion-only
 ;;      outermost-first, each variable marked 🟢 / 🟡 / 🔴.
 ;; Driven by the custom `dimfort/panelInfo' LSP request (see
 ;; DimFort/docs/design/shipped/panel-info.md). Closed by default; open it with
-;; `dimfort-panel-toggle'.
+;; `dimfort-toggle-panel'.
 
 (declare-function jsonrpc-async-request "jsonrpc")
 (declare-function jsonrpc-running-p "jsonrpc")
@@ -981,7 +1014,7 @@ Order: disabled → gutter → background → disabled.  Companion-only
   "Whether to open the side panel automatically when the server attaches.
 
 On by default — set to nil to keep it closed and open it on demand
-with `dimfort-panel-toggle'."
+with `dimfort-toggle-panel'."
   :type 'boolean)
 
 (defcustom dimfort-panel-side 'right
@@ -1000,9 +1033,28 @@ with `dimfort-panel-toggle'."
   "Idle seconds before the panel refreshes after the cursor moves."
   :type 'number)
 
-(defcustom dimfort-panel-layout 'both
-  "Which panel sections to show."
-  :type '(choice (const both) (const expression) (const routine)))
+;; Per-section visibility (0.2.6).  Replaces the previous tristate
+;; `dimfort-panel-layout' (`both' / `expression' / `routine') with three
+;; independent booleans, matching VSCompanion's
+;; `dimfort.show.{cursor,scope,imports}' and Nvim's
+;; `panel_show_{cursor,scope,imports}'.
+(defcustom dimfort-show-cursor t
+  "Show the Cursor section (Expression / Diagnostics / Interactions / Actions).
+Toggle in-session with `\\[dimfort-toggle-cursor]'.  Persistent via
+\\[customize-variable]."
+  :type 'boolean)
+
+(defcustom dimfort-show-scope t
+  "Show the Scope section (declarations in enclosing scopes at cursor).
+Toggle in-session with `\\[dimfort-toggle-scope]'.  Persistent via
+\\[customize-variable]."
+  :type 'boolean)
+
+(defcustom dimfort-show-imports t
+  "Show the Imports section (symbols brought in by `use' clauses).
+Toggle in-session with `\\[dimfort-toggle-imports]'.  Persistent via
+\\[customize-variable]."
+  :type 'boolean)
 
 (defcustom dimfort-panel-sort-mode "line"
   "Sort order shared by the panel's Scope and Imports sections.
@@ -1768,33 +1820,38 @@ filter (`dimfort--imports-filter', set via `dimfort-imports-filter')."
                                    (list (dimfort--cell title) (dimfort--cell ""))
                                    body
                                    (list (dimfort--cell ""))))))
-      (when (memq dimfort-panel-layout '(both expression))
+      ;; Per-section visibility (0.2.6).  Each section renders
+      ;; independently against its `dimfort-show-*' boolean; dividers
+      ;; between sections only emit when both neighbours are visible
+      ;; so toggling any one off doesn't leave a stranded separator.
+      (when dimfort-show-cursor
         (let ((expr (and payload (dimfort--field payload "expression"))))
           (sec "Expression"
                (if expr (dimfort--panel-render-expr expr)
-                 (list (dimfort--cell (dimfort--dim "  (none)")))))))
-      (when (eq dimfort-panel-layout 'both)
+                 (list (dimfort--cell (dimfort--dim "  (none)"))))))
         (sec "Diagnostics" (dimfort--panel-render-diagnostics payload))
         (sec "Interactions"
              (dimfort--panel-render-interactions dimfort--panel-last-interactions))
         (sec "Actions"
-             (dimfort--panel-render-actions dimfort--panel-last-actions))
-        (add (dimfort--cell dimfort--panel-divider) (dimfort--cell "")))
-      (when (memq dimfort-panel-layout '(both routine))
-        (sec "Scope" (dimfort--panel-render-scope-section payload))
-        ;; Divider between Scope and Imports matches the visual
-        ;; treatment around Actions/Scope and Imports/Footer, and
-        ;; mirrors the per-view boundary in the multi-view VSCompanion.
-        (add (dimfort--cell dimfort--panel-divider) (dimfort--cell ""))
+             (dimfort--panel-render-actions dimfort--panel-last-actions)))
+      (when dimfort-show-scope
+        (when dimfort-show-cursor
+          (add (dimfort--cell dimfort--panel-divider) (dimfort--cell "")))
+        (sec "Scope" (dimfort--panel-render-scope-section payload)))
+      (when dimfort-show-imports
+        (when (or dimfort-show-scope dimfort-show-cursor)
+          ;; Divider between Scope and Imports matches the visual
+          ;; treatment around Actions/Scope and Imports/Footer, and
+          ;; mirrors the per-view boundary in the multi-view VSCompanion.
+          (add (dimfort--cell dimfort--panel-divider) (dimfort--cell "")))
         (sec "Imports"
              (dimfort--panel-render-imports
               (and payload (dimfort--field payload "imports")))))
       ;; Footer: coverage bar (file + workspace).  Always rendered
-      ;; in the layouts that include the routine block so the user
-      ;; sees the WS state regardless of whether the active buffer
-      ;; carries a panelInfo payload.
-      (when (memq dimfort-panel-layout '(both routine))
-        (setq rows (append rows (dimfort--panel-render-footer)))))
+      ;; regardless of section visibility — the project-wide coverage
+      ;; indicator is universally useful and users who hide all three
+      ;; sections still benefit from seeing the live coverage stats.
+      (setq rows (append rows (dimfort--panel-render-footer))))
     rows))
 
 (defun dimfort--panel-paint (cells stale)
@@ -2084,12 +2141,47 @@ populate the Interactions and Actions sections). Each response repaints."
     (when win (delete-window win))))
 
 ;;;###autoload
-(defun dimfort-panel-toggle ()
-  "Toggle the DimFort side panel."
+(defun dimfort-toggle-panel ()
+  "Toggle the DimFort side panel.
+
+Renamed from `dimfort-panel-toggle' in 0.2.6 for cross-companion
+consistency (VSCompanion's `dimfort.togglePanel', Nvim's
+`:DimFortTogglePanel')."
   (interactive)
   (if (dimfort--panel-window)
       (dimfort-panel-close)
     (dimfort-panel-open)))
+
+;; Per-section visibility toggles (0.2.6).  Each one flips its
+;; `dimfort-show-*' boolean via `customize-set-variable' so a
+;; `customize-save-customized' will persist the choice across
+;; sessions.  Mirrors VSCompanion's `dimfort.toggleCursor/Scope/
+;; Imports' and Nvim's `:DimFortToggleCursor/Scope/Imports'.
+(defun dimfort--toggle-section (symbol label)
+  "Flip the boolean SYMBOL and message a LABEL summary; repaint."
+  (customize-set-variable symbol (not (symbol-value symbol)))
+  (message "DimFort: %s section %s" label
+           (if (symbol-value symbol) "shown" "hidden"))
+  (dimfort--panel-refresh))
+
+;;;###autoload
+(defun dimfort-toggle-cursor ()
+  "Show or hide the Cursor section.
+Bundles Expression / Diagnostics / Interactions / Actions."
+  (interactive)
+  (dimfort--toggle-section 'dimfort-show-cursor "Cursor"))
+
+;;;###autoload
+(defun dimfort-toggle-scope ()
+  "Show or hide the Scope section."
+  (interactive)
+  (dimfort--toggle-section 'dimfort-show-scope "Scope"))
+
+;;;###autoload
+(defun dimfort-toggle-imports ()
+  "Show or hide the Imports section."
+  (interactive)
+  (dimfort--toggle-section 'dimfort-show-imports "Imports"))
 
 ;;;###autoload
 (defun dimfort-cycle-sort-mode ()
@@ -2162,10 +2254,10 @@ source's file-coverage cache updates asynchronously.")
             (cond
              ((not ws)
               (insert "\nProject coverage not yet computed.\n")
-              (insert "Run M-x dimfort-refresh-workspace to compute.\n"))
+              (insert "Run M-x dimfort-check-workspace to compute.\n"))
              (stale
               (insert "\nFiles changed since last refresh.\n")
-              (insert "Run M-x dimfort-refresh-workspace to update.\n")))
+              (insert "Run M-x dimfort-check-workspace to update.\n")))
             (insert "\nPress q to close.\n")
             (goto-char (min saved-point (point-max)))))))))
 
