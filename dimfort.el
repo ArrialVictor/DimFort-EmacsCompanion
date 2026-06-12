@@ -2118,8 +2118,8 @@ user can never see the bottom of the panel while editing."
 
 (defvar dimfort-panel-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'dimfort-panel-activate)
-    (define-key map [mouse-1] #'dimfort-panel-activate)
+    (define-key map (kbd "RET") #'dimfort--panel-activate)
+    (define-key map [mouse-1] #'dimfort--panel-activate)
     map)
   "Keymap for `dimfort-panel-mode'.")
 
@@ -2179,8 +2179,11 @@ user can never see the bottom of the panel while editing."
       (eglot-execute (eglot-current-server) action))
      (t (message "DimFort: cannot apply this action from the panel.")))))
 
-(defun dimfort-panel-activate ()
-  "Act on the panel row at point: jump to a location, or apply an action."
+(defun dimfort--panel-activate ()
+  "Act on the panel row at point: jump to a location, or apply an action.
+
+Internal helper bound to RET / mouse-1 inside the panel buffer
+via `dimfort-panel-mode-map'; not intended as a user command."
   (interactive)
   (let ((target (get-text-property (point) 'dimfort-target)))
     (when target
@@ -2346,9 +2349,12 @@ populate the Interactions and Actions sections). Each response repaints."
     (setq dimfort--panel-timer
           (run-with-timer dimfort-panel-debounce nil #'dimfort--panel-refresh))))
 
-;;;###autoload
-(defun dimfort-panel-open ()
-  "Open the DimFort side panel and start following the cursor."
+(defun dimfort--panel-open ()
+  "Open the DimFort side panel and start following the cursor.
+
+Internal helper.  The user-facing entry point is
+`dimfort-toggle-panel'; this function is exposed only so
+`dimfort--panel-maybe-autoopen' and the toggle can call it."
   (interactive)
   (dimfort--panel-get-buffer)
   (display-buffer dimfort--panel-buffer (dimfort--panel-display-action))
@@ -2357,9 +2363,12 @@ populate the Interactions and Actions sections). Each response repaints."
     (setq dimfort--panel-source-buffer (current-buffer)))
   (dimfort--panel-refresh))
 
-;;;###autoload
-(defun dimfort-panel-close ()
-  "Close the DimFort side panel and stop following the cursor."
+(defun dimfort--panel-close ()
+  "Close the DimFort side panel and stop following the cursor.
+
+Internal helper.  The user-facing entry point is
+`dimfort-toggle-panel'; this function is exposed only so the
+toggle can call it."
   (interactive)
   (remove-hook 'post-command-hook #'dimfort--panel-maybe-schedule)
   (when (timerp dimfort--panel-timer)
@@ -2377,8 +2386,8 @@ consistency (VSCompanion's `dimfort.togglePanel', Nvim's
 `:DimFortTogglePanel')."
   (interactive)
   (if (dimfort--panel-window)
-      (dimfort-panel-close)
-    (dimfort-panel-open)))
+      (dimfort--panel-close)
+    (dimfort--panel-open)))
 
 ;; Per-section visibility toggles (0.2.6).  Each one flips its
 ;; `dimfort-show-*' boolean via `customize-set-variable' so a
@@ -2561,7 +2570,7 @@ Scope one (`dimfort-scope-filter')."
   (when (and dimfort-panel-enabled
              (memq major-mode dimfort-fortran-modes)
              (not (dimfort--panel-window)))
-    (dimfort-panel-open)))
+    (dimfort--panel-open)))
 
 (provide 'dimfort)
 
