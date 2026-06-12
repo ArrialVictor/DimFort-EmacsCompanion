@@ -281,7 +281,7 @@ window with `M-x eldoc-doc-buffer`).
 
 ## Side panel
 
-`M-x dimfort-panel-toggle` opens it on the right. The panel follows the
+`M-x dimfort-toggle-panel` opens it on the right. The panel follows the
 cursor (≈0.2 s debounce) and dims briefly while it refreshes.
 
 - [ ] **Assignment with a mismatch** — put point on the **`=`** in line 25
@@ -385,11 +385,15 @@ cursor (≈0.2 s debounce) and dims briefly while it refreshes.
       (subroutine); the Scope section switches between `Function:
       dynamic_pressure` and `Subroutine: checks` accordingly.
 
-### Panel — Diagnostics / Interactions / Actions (the `both` layout)
+### Panel — Diagnostics / Interactions / Actions
 
-These three sections sit between Expression and Scope. Each is always
-present, showing `(none)` when nothing applies, so they don't pop in and
-out as point moves.
+These three sections sit inside the Cursor block (alongside
+Expression) and are toggled together via `M-x dimfort-toggle-cursor`
+(0.2.6) — see the per-section visibility entries in the 0.2.6
+section below. They sit between Expression and Scope in the default
+layout (all three sections visible). Each is always present, showing
+`(none)` when nothing applies, so they don't pop in and out as point
+moves.
 
 - [ ] **Diagnostics** — point on line 25 (`bogus = c_sound * t`); the
       Diagnostics section shows **🔴 H001: …**. On line 23 (`t_celsius`) it
@@ -607,6 +611,195 @@ end module solver
       `dimfort-scope-filter` (Scope).
 - [ ] **Empty case** — point in `phys_base` (which imports nothing):
       the Imports section shows `(none)`.
+
+## Panel sort, unit display, coverage report, `[N/5]` (0.2.6)
+
+The Emacs companion keeps the single unified `*dimfort*` panel buffer
+(no per-section windows), but gains shared sort + unit-display modes
+across the Scope and Imports sections, an explicit visual divider
+between them, and an async-aware `M-x dimfort-coverage-report` buffer.
+Surfaces here mirror the VSCompanion `panel.sortMode` /
+`panel.unitDisplayMode` settings and the status-bar coverage tooltip.
+
+With `qa.f90` open and the panel visible (`M-x dimfort-toggle-panel`):
+
+### Divider between Scope and Imports
+
+- [ ] **Horizontal rule visible** — a row of `─` characters spans the
+      panel width between the Scope section's last row and the
+      `Imports` header. Matches the divider already drawn between
+      Actions and Scope, and between Imports and the footer.
+
+### Panel sort cycle (`M-x dimfort-cycle-sort-mode`)
+
+- [ ] **Shared mode** — the command cycles
+      `dimfort-panel-sort-mode` through `line → alphabetic → status`;
+      the echo area reports the new mode (e.g. `DimFort: sort mode →
+      alphabetic`).
+
+- [ ] **Synchronous re-render** — invoking the command re-sorts the
+      Scope **and** Imports rows in the same repaint (no LSP
+      round-trip — panel repaints from cached payload). Cycle once
+      and verify Imports rows reorder alongside Scope rows.
+
+- [ ] **Persistence across sessions** — pick a non-default mode (e.g.
+      `alphabetic`) via `M-x customize-variable RET
+      dimfort-panel-sort-mode`; save for future sessions. Restart
+      Emacs and reopen the file — both sections come back in
+      alphabetic order.
+
+### Panel unit-display cycle (`M-x dimfort-cycle-unit-display`)
+
+- [ ] **Shared mode** — the command cycles
+      `dimfort-panel-unit-display-mode` through
+      `input → canonical → both`; echo area reports the new mode.
+
+- [ ] **Column layout changes per mode** — applies to both Scope and
+      Imports in the same repaint:
+      - **input**: one unit column showing the annotation as written
+        (e.g. `m/s` instead of `m·s⁻¹`). Thinnest layout.
+      - **canonical** (default): one unit column showing the base-SI
+        normalised form (`m·s⁻¹`).
+      - **both**: two unit columns side-by-side
+        (`input ⟶ canonical`). Widest layout.
+
+- [ ] **Persistence across sessions** — same `customize-variable`
+      path as sort; choice survives Emacs restart.
+
+### `M-x dimfort-coverage-report` async re-render (PR #20)
+
+- [ ] **Cold open populates** — visit `qa.f90` from a fresh session,
+      then run `M-x dimfort-coverage-report` **immediately** (do not
+      edit, do not wait). A `*DimFort Coverage*` buffer opens at the
+      bottom (height ~14) with a File / Project table. The **File**
+      column populates within ~1–2 s of opening as the LSP
+      `dimfort/coverageStats` response lands — no race, no flicker,
+      no need to re-invoke the command.
+
+- [ ] **Project column dim until refreshed** — until you run `M-x
+      dimfort-check-workspace`, the Project column shows `–` glyphs
+      and the footer reads `Project coverage not yet computed.` /
+      `Run M-x dimfort-check-workspace to compute.`. After the
+      workspace check completes, the Project column populates
+      asynchronously (driven by the
+      `dimfort/workspaceCheckCompleted` notification, not by the
+      command's return value).
+
+- [ ] **Stale marker on edits** — after a workspace check, edit any
+      buffer. The Project column header switches to `Project
+      (stale)` and the footer text invites re-running the workspace
+      command. Re-run to refresh.
+
+- [ ] **`q` closes** — pressing `q` in the report buffer buries the
+      window via `quit-window`.
+
+### Source-buffer footer fix (PR #20)
+
+- [ ] **Footer tracks the explicit source buffer** — open `qa.f90`,
+      let the panel populate, then `C-x b` to the `*dimfort*` panel
+      buffer itself. The panel footer's `File:` cell continues to
+      reflect `qa.f90`'s stats (and does **not** flicker to `–` or
+      try to recompute against the panel buffer's own URI). Same
+      check while the `*DimFort Coverage*` buffer is current: the
+      footer remains stable. The fix reads from the
+      `dimfort--panel-source-buffer` variable rather than
+      `(current-buffer)`, so stats notifications that arrive in a
+      non-source-buffer context (panel buffer, coverage-report
+      buffer, workspace-check-completed callback) no longer corrupt
+      the footer.
+
+### Prime stats on attach (PR #20)
+
+- [ ] **Cold-open footer populates without edits** — kill all Emacs
+      buffers, then revisit `qa.f90` from disk. Within ~1.5 s of the
+      LSP attaching (`eglot-managed-mode-hook` /
+      `lsp-managed-mode-hook`), the panel footer's `File:` cell
+      populates with verified / unverified / violation counts. No
+      manual edit (which was previously the only trigger via
+      `after-change-functions`) is required.
+
+### `[N/5]` workspace-check phase counter (DimFort PR #81)
+
+Best verified on a real-world ~2400-file workspace (the small `qa.f90`
+sample completes too fast to read every phase). Emacs eglot renders
+the `message` field of a `workDoneProgress` notification in the
+mode-line by default, so the counter should appear without extra
+configuration.
+
+- [ ] **Five phases observed** — open a large real-world Fortran
+      codebase, run `M-x dimfort-check-workspace`, and watch the
+      mode-line progress region. The message cycles through the
+      following phases (numbers fixed, file count varies):
+      - `[1/5] loading…`
+      - `[2/5] indexing modules…`
+      - `[3/5] checking…`
+      - `[4/5] published N/N`
+      - `[5/5] projecting coverage…`
+
+- [ ] **`[5/5]` stays visible through projection window** — after the
+      diagnostics-publish wave finishes, the mode-line continues to
+      show `[5/5] projecting coverage…` for the ~5 s post-publish
+      projection window. The progress region only clears when the
+      `dimfort/workspaceCheckCompleted` notification arrives and the
+      panel footer's Project column populates.
+
+### Per-section visibility (`dimfort-show-*`)
+
+Replaces the previous tristate `dimfort-panel-layout` defcustom
+(`both` / `expression` / `routine`). Each section is now toggled
+independently via its own `defcustom` boolean; defaults to all three
+visible.
+
+- [ ] **`M-x dimfort-toggle-cursor`** hides the Expression /
+      Diagnostics / Interactions / Actions block. Echo area reads
+      `DimFort: Cursor section hidden`. Run again to show it. Scope
+      and Imports remain unaffected. Persists across sessions when
+      the user runs `M-x customize-save-customized` (or
+      `customize-save-variable` on the `dimfort-show-cursor`
+      defcustom).
+
+- [ ] **`M-x dimfort-toggle-scope`** hides the Scope section only.
+
+- [ ] **`M-x dimfort-toggle-imports`** hides the Imports section only.
+
+- [ ] **Dividers adapt** — toggle Cursor off; the `─────` divider
+      between Cursor and Scope is gone (no stranded separator).
+      Toggle Scope off too; the divider between Scope and Imports
+      also disappears. Visible dividers always sit between two
+      visible neighbours.
+
+- [ ] **Footer always visible** — toggle ALL three sections off. The
+      panel buffer now shows only the footer (`File: …  Project:
+      …`). The footer is universal — it doesn't track section
+      visibility.
+
+### Cache cycle + clear (`M-x dimfort-cycle-cache` / `dimfort-clear-cache`)
+
+- [ ] **`M-x dimfort-cycle-cache`** cycles `dimfort-cache-mode`
+      through `off → read-only → read-write → off`. Echo area
+      reports each tick (`DimFort: cache → read-only`, etc.). The
+      server restarts on each tick (cache mode is a wire-level
+      setting). Previously (0.2.5) this command (then named
+      `dimfort-toggle-cache`) was a 2-state toggle skipping
+      `read-only`; 0.2.6 brings parity with the `dimfort-cache-mode`
+      defcustom's full range.
+
+- [ ] **`M-x dimfort-clear-cache`** deletes the `.dimfort-cache/`
+      directory under the workspace root and restarts the server.
+      Echo area reads `DimFort: cache cleared (…)`. When the cache
+      directory doesn't exist, echo area reads `DimFort: cache
+      directory does not exist (already clean).`. Mirrors
+      VSCompanion's `dimfort.clearCache` and Nvim's
+      `:DimFortClearCache`.
+
+### Command rename: `dimfort-toggle-panel` (0.2.6)
+
+- [ ] **Renamed from `dimfort-panel-toggle`** for cross-companion
+      consistency (VSCompanion's `dimfort.togglePanel`, Nvim's
+      `:DimFortTogglePanel`). `M-x dimfort-toggle-panel` opens /
+      closes the side panel. The old name is **gone** (beta-period
+      rename per release-cycle convention); user-side `init.el`
+      bindings need updating.
 
 ## Configurable comment delimiters (0.2.2)
 
@@ -841,7 +1034,7 @@ Hover with `eldoc-doc-buffer` (eglot) or `lsp-ui-doc-show`
 ### Side panel
 
 Cursor in each routine's body in turn (toggle the panel with
-`M-x dimfort-panel-toggle` if not already visible). The Scope
+`M-x dimfort-toggle-panel` if not already visible). The Scope
 section should list the routine's locals + formals; the polymorphic
 ones render with `'a` in the unit column.
 
