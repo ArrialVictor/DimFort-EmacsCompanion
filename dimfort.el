@@ -853,11 +853,11 @@ returns the symbol and lets the caller surface a hint."
       (let ((flavour
              (completing-read
               "DimFort — Project configuration file: start from? "
-              '("Empty template"
-                "All sections (all commented out)")
+              '("Empty file"
+                "Reference template (all sections commented out)")
               nil t)))
         (when (and flavour (not (string-empty-p flavour)))
-          (let ((content (if (string= flavour "Empty template")
+          (let ((content (if (string= flavour "Empty file")
                              (dimfort--dimfort-toml-stub-empty)
                            (dimfort--dimfort-toml-stub))))
             (with-temp-file path
@@ -873,11 +873,11 @@ returns the symbol and lets the caller surface a hint."
       (let ((flavour
              (completing-read
               "DimFort — Project units file: start from? "
-              '("Empty template"
-                "Defaults as reference (all commented out)")
+              '("Empty file"
+                "Reference template (bundled defaults, all commented out)")
               nil t)))
         (when (and flavour (not (string-empty-p flavour)))
-          (let ((content (if (string= flavour "Empty template")
+          (let ((content (if (string= flavour "Empty file")
                              (dimfort--units-stub-empty)
                            (dimfort--units-stub-from-defaults))))
             (with-temp-file path
