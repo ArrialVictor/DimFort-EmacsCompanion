@@ -88,7 +88,7 @@ a non-empty value is forwarded as `cacheDir'."
 (defcustom dimfort-scale-mode "auto"
   "Opt-in scale/magnitude checking (S001 multiplicative, S002 affine).
 
-\"auto\" (the default) defers to the project's `.dimfort.toml'
+\"auto\" (the default) defers to the project's `dimfort.toml'
 `[scale] enabled' — the `scaleMode' option is not forwarded, so the
 server config wins. \"on\"/\"off\" forward an explicit boolean that
 overrides the toml for the session.  Cycle with `dimfort-cycle-scale'."
@@ -128,7 +128,7 @@ three clients present an identical surface to the server."
     (when (and dimfort-cache-dir (not (string-empty-p dimfort-cache-dir)))
       (setq opts (append opts `((cacheDir . ,dimfort-cache-dir)))))
     ;; Scale checking is tri-state: "auto" omits scaleMode so the server's
-    ;; .dimfort.toml [scale] enabled wins; "on"/"off" send an explicit
+    ;; dimfort.toml [scale] enabled wins; "on"/"off" send an explicit
     ;; boolean that overrides the toml for the session.
     (when (member dimfort-scale-mode '("on" "off"))
       (setq opts (append opts
@@ -652,7 +652,7 @@ otherwise."
 (dimfort--define-cycle dimfort-cycle-cache
                        dimfort-cache-mode
                        "cache" '("off" "read-only" "read-write"))
-;; Scale checking is tri-state: "auto" defers to the project .dimfort.toml,
+;; Scale checking is tri-state: "auto" defers to the project dimfort.toml,
 ;; "on"/"off" override it for the session.
 (dimfort--define-cycle dimfort-cycle-scale
                        dimfort-scale-mode
@@ -691,15 +691,15 @@ VSCompanion's `dimfort.clearCache' and Nvim's
     (dimfort-restart)))
 
 ;; =====================================================================
-;; M-x dimfort-open-config — open or create .dimfort.toml / units file.
+;; M-x dimfort-open-config — open or create dimfort.toml / units file.
 ;; =====================================================================
 ;;
 ;; Mirrors VSCompanion's `DimFort: Open Config…' (VSCompanion PR #34)
 ;; and Nvim's `:DimFortOpenConfig'. Two-step `completing-read': first
-;; the file (`'.dimfort.toml'' or `Project units file''), then for
+;; the file (`'dimfort.toml'' or `Project units file''), then for
 ;; units file when creating, a sub-pick between `Empty template' and
 ;; `Defaults as reference (all commented out)'. Auto-wires
-;; `[units].file = "units.toml"' into `.dimfort.toml' so the server
+;; `[units].file = "units.toml"' into `dimfort.toml' so the server
 ;; picks up the new units file immediately.
 
 (defun dimfort--workspace-root ()
@@ -710,8 +710,19 @@ VSCompanion's `dimfort.clearCache' and Nvim's
           (project-root proj)))
       default-directory))
 
+(defun dimfort--dimfort-toml-stub-empty ()
+  "Return a minimal commented stub for a fresh ``dimfort.toml``."
+  (mapconcat
+   #'identity
+   '("# DimFort project configuration."
+     "#"
+     "# Add project-wide settings here. Reference:"
+     "#   https://github.com/ArrialVictor/DimFort/blob/main/docs/reference/dimfort-toml.md"
+     "")
+   "\n"))
+
 (defun dimfort--dimfort-toml-stub ()
-  "Return a minimal commented stub for a fresh ``.dimfort.toml``."
+  "Return a minimal commented stub for a fresh ``dimfort.toml``."
   (mapconcat
    #'identity
    '("# DimFort project configuration."
@@ -835,13 +846,24 @@ returns the symbol and lets the caller surface a hint."
         'wired)))))
 
 (defun dimfort--open-or-create-dimfort-toml (root)
-  "Open ROOT/.dimfort.toml, creating a stub if it doesn't exist."
-  (let ((path (expand-file-name ".dimfort.toml" root)))
-    (unless (file-exists-p path)
-      (with-temp-file path
-        (insert (dimfort--dimfort-toml-stub)))
-      (message "DimFort: created %s" path))
-    (find-file path)))
+  "Open ROOT/dimfort.toml, creating a stub if it doesn't exist."
+  (let ((path (expand-file-name "dimfort.toml" root)))
+    (if (file-exists-p path)
+        (find-file path)
+      (let ((flavour
+             (completing-read
+              "DimFort — Project configuration file: start from? "
+              '("Empty template"
+                "All sections (all commented out)")
+              nil t)))
+        (when (and flavour (not (string-empty-p flavour)))
+          (let ((content (if (string= flavour "Empty template")
+                             (dimfort--dimfort-toml-stub-empty)
+                           (dimfort--dimfort-toml-stub))))
+            (with-temp-file path
+              (insert content))
+            (find-file path)
+            (message "DimFort: created %s" path)))))))
 
 (defun dimfort--open-or-create-units-file (root)
   "Open ROOT/units.toml, creating a stub if it doesn't exist."
@@ -861,25 +883,25 @@ returns the symbol and lets the caller surface a hint."
             (with-temp-file path
               (insert content))
             (let ((wired (dimfort--try-wire-units-file
-                          (expand-file-name ".dimfort.toml" root))))
+                          (expand-file-name "dimfort.toml" root))))
               (find-file path)
               (cond
                ((eq wired 'wired)
-                (message "DimFort: created units.toml + wired into .dimfort.toml"))
+                (message "DimFort: created units.toml + wired into dimfort.toml"))
                ((eq wired 'exists-with-units-section)
                 (message
-                 "DimFort: created units.toml. Your .dimfort.toml already has a [units] section — add 'file = \"units.toml\"' under it to enable the new file."))
+                 "DimFort: created units.toml. Your dimfort.toml already has a [units] section — add 'file = \"units.toml\"' under it to enable the new file."))
                (t
                 (message "DimFort: created units.toml"))))))))))
 
 ;;;###autoload
 (defun dimfort-open-config ()
-  "Quick-pick to open or create ``.dimfort.toml'' / project units file.
+  "Quick-pick to open or create ``dimfort.toml'' / project units file.
 
 When the chosen file does not exist, a stub is created (units file
 offers an additional sub-pick between empty and defaults-as-reference).
 For the units file, ``[units].file = \"units.toml\"`` is auto-wired
-into ``.dimfort.toml`` (creating it if necessary)."
+into ``dimfort.toml`` (creating it if necessary)."
   (interactive)
   (let ((root (dimfort--workspace-root)))
     (if (null root)
@@ -887,12 +909,13 @@ into ``.dimfort.toml`` (creating it if necessary)."
          "DimFort: open a project folder first; nothing to wire a config into.")
       (let ((choice (completing-read
                      "DimFort — Open Config: which config file? "
-                     '(".dimfort.toml" "Project units file")
+                     '("Project configuration file (dimfort.toml)"
+                       "Project units file (units.toml)")
                      nil t)))
         (cond
-         ((string= choice ".dimfort.toml")
+         ((string= choice "Project configuration file (dimfort.toml)")
           (dimfort--open-or-create-dimfort-toml root))
-         ((string= choice "Project units file")
+         ((string= choice "Project units file (units.toml)")
           (dimfort--open-or-create-units-file root)))))))
 
 ;;;###autoload

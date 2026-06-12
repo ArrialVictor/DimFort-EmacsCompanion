@@ -65,7 +65,7 @@ All variables live under `M-x customize-group RET dimfort`:
 | `dimfort-hover`                   | `"short"`   | Hover verbosity: `disabled` / `short` / `detailed`. Defaults to `short` — a compact unit surface beside the panel. |
 | `dimfort-cache-mode`              | `"read-write"` | Content-hash check cache (`off` / `read-only` / `read-write`). |
 | `dimfort-cache-dir`               | `""`        | Cache directory (empty = server default). |
-| `dimfort-scale-mode`              | `"auto"`    | Scale checking (S001/S002): `auto` defers to `.dimfort.toml`, `on`/`off` override. Cycle with `dimfort-cycle-scale`. |
+| `dimfort-scale-mode`              | `"auto"`    | Scale checking (S001/S002): `auto` defers to `dimfort.toml`, `on`/`off` override. Cycle with `dimfort-cycle-scale`. |
 | `dimfort-max-workset-size`        | `40`        | Cap on workset size. |
 | `dimfort-external-modules`        | `nil`       | Modules treated as out-of-workset (silences U007). |
 | `dimfort-fortran-modes`           | `(f90-mode fortran-mode)` | Modes DimFort registers for. |
@@ -91,8 +91,8 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-cycle-hover`        | Cycle hover verbosity (disabled → short → detailed); restarts. |
 | `M-x dimfort-cycle-cache`        | Cycle the content-hash cache through `off` → `read-only` → `read-write`. |
 | `M-x dimfort-clear-cache`        | Delete the `.dimfort-cache/` directory and restart the server. |
-| `M-x dimfort-open-config`        | Quick-pick between `.dimfort.toml` (workspace config) and the project units file. Each opens if it exists, or creates a commented stub if not. When creating a units file: sub-pick `Empty template` or `Defaults as reference (all commented out)`. Auto-wires `[units].file = "units.toml"` into `.dimfort.toml`. |
-| `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `.dimfort.toml`. |
+| `M-x dimfort-open-config`        | Quick-pick between `dimfort.toml` (workspace config) and the project units file. Each opens if it exists, or creates a commented stub if not. When creating a units file: sub-pick `Empty template` or `Defaults as reference (all commented out)`. Auto-wires `[units].file = "units.toml"` into `dimfort.toml`. |
+| `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `dimfort.toml`. |
 | `M-x dimfort-cycle-coverage`     | Cycle coverage visualisation (`disabled` → `gutter` → `background`); companion-only, no LSP restart. |
 | `M-x dimfort-toggle-panel`       | Toggle the cursor-following side panel. |
 | `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
