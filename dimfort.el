@@ -481,6 +481,17 @@ Also schedules a delayed inlay-hint re-request, since eglot
 ignores `workspace/inlayHint/refresh' and would otherwise
 leave the buffer with the pre-restart hint cache."
   (interactive)
+  ;; Cancel any debounced panel-refresh queued by the post-command-hook
+  ;; just before the restart fired.  Without this, the pending timer
+  ;; would land in the shutdown-to-reattach gap, hit `dimfort--panel-rpc'
+  ;; with no current server, and overwrite the dimmed cache with the
+  ;; "(DimFort LSP not attached)" fallback for ~half a second until the
+  ;; new server attached and our wait-and-refresh logic kicked in.
+  ;; `dimfort--restart-wait-and-refresh' below is the authoritative
+  ;; post-restart refresh path; the stale timer would only race it.
+  (when (timerp dimfort--panel-timer)
+    (cancel-timer dimfort--panel-timer)
+    (setq dimfort--panel-timer nil))
   ;; Reset workspace-bar state — the prior server's cached coverage
   ;; payload and any in-flight spinner do not survive the restart.
   ;; Mirrors the Nvim companion's stats.reset() pattern.
