@@ -88,7 +88,7 @@ a non-empty value is forwarded as `cacheDir'."
 (defcustom dimfort-scale-mode "auto"
   "Opt-in scale/magnitude checking (S001 multiplicative, S002 affine).
 
-\"auto\" (the default) defers to the project's `.dimfort.toml'
+\"auto\" (the default) defers to the project's `dimfort.toml'
 `[scale] enabled' — the `scaleMode' option is not forwarded, so the
 server config wins. \"on\"/\"off\" forward an explicit boolean that
 overrides the toml for the session.  Cycle with `dimfort-cycle-scale'."
@@ -128,7 +128,7 @@ three clients present an identical surface to the server."
     (when (and dimfort-cache-dir (not (string-empty-p dimfort-cache-dir)))
       (setq opts (append opts `((cacheDir . ,dimfort-cache-dir)))))
     ;; Scale checking is tri-state: "auto" omits scaleMode so the server's
-    ;; .dimfort.toml [scale] enabled wins; "on"/"off" send an explicit
+    ;; dimfort.toml [scale] enabled wins; "on"/"off" send an explicit
     ;; boolean that overrides the toml for the session.
     (when (member dimfort-scale-mode '("on" "off"))
       (setq opts (append opts
@@ -652,7 +652,7 @@ otherwise."
 (dimfort--define-cycle dimfort-cycle-cache
                        dimfort-cache-mode
                        "cache" '("off" "read-only" "read-write"))
-;; Scale checking is tri-state: "auto" defers to the project .dimfort.toml,
+;; Scale checking is tri-state: "auto" defers to the project dimfort.toml,
 ;; "on"/"off" override it for the session.
 (dimfort--define-cycle dimfort-cycle-scale
                        dimfort-scale-mode
@@ -689,6 +689,234 @@ VSCompanion's `dimfort.clearCache' and Nvim's
          (message "DimFort: clear cache failed — %s" (error-message-string err))
          (signal (car err) (cdr err))))))
     (dimfort-restart)))
+
+;; =====================================================================
+;; M-x dimfort-open-config — open or create dimfort.toml / units file.
+;; =====================================================================
+;;
+;; Mirrors VSCompanion's `DimFort: Open Config…' (VSCompanion PR #34)
+;; and Nvim's `:DimFortOpenConfig'. Two-step `completing-read': first
+;; the file (`'dimfort.toml'' or `Project units file''), then for
+;; units file when creating, a sub-pick between `Empty template' and
+;; `Defaults as reference (all commented out)'. Auto-wires
+;; `[units].file = "units.toml"' into `dimfort.toml' so the server
+;; picks up the new units file immediately.
+
+(defun dimfort--workspace-root ()
+  "Return the workspace root (project root if available, else `default-directory')."
+  (or (when (and (fboundp 'project-current)
+                 (fboundp 'project-root))
+        (when-let ((proj (project-current)))
+          (project-root proj)))
+      default-directory))
+
+(defun dimfort--dimfort-toml-stub-empty ()
+  "Return a minimal commented stub for a fresh ``dimfort.toml``."
+  (mapconcat
+   #'identity
+   '("# DimFort project configuration."
+     "#"
+     "# Add project-wide settings here. Reference:"
+     "#   https://github.com/ArrialVictor/DimFort/blob/main/docs/reference/dimfort-toml.md"
+     "")
+   "\n"))
+
+(defun dimfort--dimfort-toml-stub ()
+  "Return a minimal commented stub for a fresh ``dimfort.toml``."
+  (mapconcat
+   #'identity
+   '("# DimFort project configuration."
+     "#"
+     "# Optional. Without this file, DimFort uses bundled defaults for"
+     "# everything. Each section below is also optional — uncomment +"
+     "# customise as needed. Reference:"
+     "#   https://github.com/ArrialVictor/DimFort/blob/main/docs/reference/dimfort-toml.md"
+     ""
+     "# [units]"
+     "# file = \"units.toml\"   # Project units file (extends bundled defaults)"
+     ""
+     "# [parser]"
+     "# # Extra comment delimiters for unit annotations."
+     "# # Defaults already recognise `!< @unit{...}' and friends."
+     ""
+     "# [diagnostics]"
+     "# # H001 = \"off\"   # Per-code severity overrides"
+     ""
+     "# [scale]"
+     "# # enabled = true   # Enable S001/S002 scale-aware checking"
+     ""
+     "# [project]"
+     "# # src_paths = [\"src\"]   # Narrow the workspace check to these subdirs"
+     "")
+   "\n"))
+
+(defun dimfort--units-stub-header ()
+  "Return the common header for a fresh project units file."
+  (mapconcat
+   #'identity
+   '("# DimFort project units file."
+     "#"
+     "# Extends (does not replace) the bundled defaults. To see what's"
+     "# already in the defaults, run:  dimfort show-defaults units"
+     "#"
+     "# Schema:"
+     "#   [base]     — base units mapping to SI dimension slots"
+     "#                (M / L / T / Theta / I / N / J)"
+     "#   [prefixes] — SI prefix multipliers (numeric or \"p/q\" rationals)"
+     "#   [derived]  — derived units; `expr' parsed against the table;"
+     "#                `prefixable = true' opts in to prefix expansion"
+     "#"
+     "")
+   "\n"))
+
+(defun dimfort--units-stub-empty ()
+  "Return the ``Empty template'' units-file stub."
+  (concat
+   (dimfort--units-stub-header)
+   (mapconcat
+    #'identity
+    '("# Example: a custom derived unit."
+      "#"
+      "# [derived]"
+      "# barrel = { expr = \"159 * L\", prefixable = false }   # US oil barrel"
+      "")
+    "\n")))
+
+(defun dimfort--units-stub-from-defaults ()
+  "Return the ``Defaults as reference'' units-file stub.
+Shells out to ``dimfort show-defaults units'' and comments every
+non-blank, non-comment line so the file is a no-op until the user
+uncomments what they want. Falls through to the empty stub with an
+explanatory comment if the CLI invocation fails."
+  (let* ((default-directory (dimfort--workspace-root))
+         (defaults
+          (with-temp-buffer
+            (let ((exit (ignore-errors
+                          (call-process dimfort-executable nil t nil
+                                        "show-defaults" "units"))))
+              (if (eq exit 0)
+                  (buffer-string)
+                "")))))
+    (if (or (null defaults) (string-empty-p defaults))
+        (concat
+         (dimfort--units-stub-empty)
+         "\n# (Couldn't fetch the bundled defaults; install or upgrade"
+         "\n#  DimFort, then run `dimfort show-defaults units' to see"
+         "\n#  what's available.)\n")
+      (let* ((banner (concat
+                      (dimfort--units-stub-header)
+                      "# Below: bundled defaults, ALL commented out.\n"
+                      "# Uncomment any line to enable, override, or extend.\n"
+                      "# To start from scratch instead, delete everything below this banner.\n"
+                      "#\n"))
+             (lines (split-string defaults "\n"))
+             (commented (mapconcat
+                         (lambda (line)
+                           (if (or (string-empty-p line)
+                                   (string-prefix-p "#" line))
+                               line
+                             (concat "# " line)))
+                         lines
+                         "\n")))
+        (concat banner commented)))))
+
+(defun dimfort--try-wire-units-file (toml-path)
+  "Ensure TOML-PATH has ``[units].file = \"units.toml\"``.
+Returns one of the symbols ``wired'', ``already-wired'', or
+``exists-with-units-section''. The string-ops approach only handles
+the common path (no existing ``[units]`` section); the edge case
+returns the symbol and lets the caller surface a hint."
+  (let ((existing (if (file-exists-p toml-path)
+                      (with-temp-buffer
+                        (insert-file-contents toml-path)
+                        (buffer-string))
+                    "")))
+    (cond
+     ((string-match "\\[units\\][^\\[]*?\n[ \t]*file[ \t]*=" existing)
+      'already-wired)
+     ((string-match "\\(\\`\\|\n\\)\\[units\\][ \t]*\n" existing)
+      'exists-with-units-section)
+     (t
+      (let ((sep (cond
+                  ((string-empty-p existing) "")
+                  ((not (eq (aref existing (1- (length existing))) ?\n)) "\n\n")
+                  (t "\n"))))
+        (with-temp-file toml-path
+          (insert existing sep "[units]\nfile = \"units.toml\"\n"))
+        'wired)))))
+
+(defun dimfort--open-or-create-dimfort-toml (root)
+  "Open ROOT/dimfort.toml, creating a stub if it doesn't exist."
+  (let ((path (expand-file-name "dimfort.toml" root)))
+    (if (file-exists-p path)
+        (find-file path)
+      (let ((flavour
+             (completing-read
+              "DimFort — Project configuration file: start from? "
+              '("Empty file"
+                "Reference template (all sections commented out)")
+              nil t)))
+        (when (and flavour (not (string-empty-p flavour)))
+          (let ((content (if (string= flavour "Empty file")
+                             (dimfort--dimfort-toml-stub-empty)
+                           (dimfort--dimfort-toml-stub))))
+            (with-temp-file path
+              (insert content))
+            (find-file path)
+            (message "DimFort: created %s" path)))))))
+
+(defun dimfort--open-or-create-units-file (root)
+  "Open ROOT/units.toml, creating a stub if it doesn't exist."
+  (let ((path (expand-file-name "units.toml" root)))
+    (if (file-exists-p path)
+        (find-file path)
+      (let ((flavour
+             (completing-read
+              "DimFort — Project units file: start from? "
+              '("Empty file"
+                "Reference template (bundled defaults, all commented out)")
+              nil t)))
+        (when (and flavour (not (string-empty-p flavour)))
+          (let ((content (if (string= flavour "Empty file")
+                             (dimfort--units-stub-empty)
+                           (dimfort--units-stub-from-defaults))))
+            (with-temp-file path
+              (insert content))
+            (let ((wired (dimfort--try-wire-units-file
+                          (expand-file-name "dimfort.toml" root))))
+              (find-file path)
+              (cond
+               ((eq wired 'wired)
+                (message "DimFort: created units.toml + wired into dimfort.toml"))
+               ((eq wired 'exists-with-units-section)
+                (message
+                 "DimFort: created units.toml. Your dimfort.toml already has a [units] section — add 'file = \"units.toml\"' under it to enable the new file."))
+               (t
+                (message "DimFort: created units.toml"))))))))))
+
+;;;###autoload
+(defun dimfort-open-config ()
+  "Quick-pick to open or create ``dimfort.toml'' / project units file.
+
+When the chosen file does not exist, a stub is created (units file
+offers an additional sub-pick between empty and defaults-as-reference).
+For the units file, ``[units].file = \"units.toml\"`` is auto-wired
+into ``dimfort.toml`` (creating it if necessary)."
+  (interactive)
+  (let ((root (dimfort--workspace-root)))
+    (if (null root)
+        (message
+         "DimFort: open a project folder first; nothing to wire a config into.")
+      (let ((choice (completing-read
+                     "DimFort — Open Config: which config file? "
+                     '("Project configuration file (dimfort.toml)"
+                       "Project units file (units.toml)")
+                     nil t)))
+        (cond
+         ((string= choice "Project configuration file (dimfort.toml)")
+          (dimfort--open-or-create-dimfort-toml root))
+         ((string= choice "Project units file (units.toml)")
+          (dimfort--open-or-create-units-file root)))))))
 
 ;;;###autoload
 (defun dimfort-status ()
