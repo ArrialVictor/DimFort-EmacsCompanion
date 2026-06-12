@@ -518,13 +518,36 @@ leave the buffer with the pre-restart hint cache."
   ;; until the user moved the cursor.
   (dimfort--restart-wait-and-refresh (+ (float-time) 10.0)))
 
+(defun dimfort--restart-eglot-ready-p (server)
+  "Return non-nil when eglot SERVER has completed the initialize handshake.
+`eglot-current-server' returns the server object as soon as the
+underlying process spawns, but requests issued before initialize
+completes are silently dropped by our `ignore-errors' wrapper —
+which left the post-restart auto-refresh firing into a void and the
+panel blank until the next cursor motion happened to land in a
+ready-state window.
+
+Probe capabilities to gate on the initialize roundtrip having
+landed.  Prefer the public `eglot-server-capable' (Emacs 29 /
+eglot 1.13+); fall back to the internal `eglot--server-capable'
+for older eglot; if neither is bound, fall back to the legacy
+process-attached check (no worse than pre-fix behaviour)."
+  (ignore-errors
+    (cond
+     ((fboundp 'eglot-server-capable)
+      (eglot-server-capable :textDocumentSync))
+     ((fboundp 'eglot--server-capable)
+      (eglot--server-capable :textDocumentSync))
+     (t server))))
+
 (defun dimfort--restart-have-server-p (buf)
-  "Return non-nil when an LSP client is actively attached to BUF."
+  "Return non-nil when an LSP client is attached AND initialized for BUF."
   (and (buffer-live-p buf)
        (with-current-buffer buf
          (or (and (featurep 'eglot)
                   (fboundp 'eglot-current-server)
-                  (eglot-current-server))
+                  (when-let ((server (eglot-current-server)))
+                    (dimfort--restart-eglot-ready-p server)))
              (and (featurep 'lsp-mode)
                   (fboundp 'lsp-workspaces)
                   (lsp-workspaces))))))
