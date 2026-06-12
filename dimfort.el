@@ -570,7 +570,7 @@ server-side; the server sends a heads-up toast in that case."
     (dimfort--panel-repaint)
     (let ((server (eglot-current-server)))
       (condition-case nil
-          (eglot-execute-command server "dimfort.checkWorkspace" [])
+          (eglot-execute-command server "dimfort/checkWorkspace" [])
         (error
          (setq dimfort--ws-refreshing nil)
          (dimfort--ws-stop-spinner)
@@ -580,7 +580,7 @@ server-side; the server sends a heads-up toast in that case."
     (dimfort--ws-start-spinner)
     (dimfort--panel-repaint)
     (condition-case nil
-        (lsp--send-execute-command "dimfort.checkWorkspace" [])
+        (lsp--send-execute-command "dimfort/checkWorkspace" [])
       (error
        (setq dimfort--ws-refreshing nil)
        (dimfort--ws-stop-spinner)
