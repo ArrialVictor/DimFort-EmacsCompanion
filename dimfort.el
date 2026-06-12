@@ -562,16 +562,41 @@ silently after it."
   (let ((buf dimfort--panel-source-buffer))
     (cond
      ((and buf (dimfort--restart-have-server-p buf))
-      (with-current-buffer buf
-        ;; Panel: cursor-position params + dimfort/panelInfo request.
-        (ignore-errors (dimfort--panel-refresh))
-        ;; File-coverage stats: refresh active-file's footer File:
-        ;; segment.  Without this, the segment carries the prior
-        ;; server's numbers until the user edits the buffer.
-        (ignore-errors (dimfort--coverage-stats-refresh-active))))
+      (dimfort--restart-after-didopen buf))
      ((< (float-time) deadline)
       (run-at-time 0.3 nil #'dimfort--restart-wait-and-refresh deadline))
      (t nil))))
+
+(defun dimfort--restart-after-didopen (buf)
+  "Wait for BUF's `textDocument/didOpen' to be processed, then refresh.
+
+Even once the initialize handshake has landed (capabilities-probe
+in `dimfort--restart-have-server-p'), eglot still has to send
+`textDocument/didOpen' for every managed buffer.  Firing
+`dimfort/panelInfo' before the server has processed that didOpen
+returns a valid-but-empty payload — the side-panel renders every
+section but each one shows `(none)' until the next cursor motion
+schedules another refresh.
+
+LSP guarantees in-order processing per stream, so a
+`textDocument/documentSymbol' request issued AFTER didOpen will
+not be processed until didOpen has landed.  We piggy-back on that
+ordering: probe with documentSymbol, then fire the real refreshes
+in its callback.  On probe failure (timeout, server crash, etc.)
+the callback never fires and the panel keeps the dimmed pre-restart
+cache — strictly no worse than the prior \"refresh anyway\" path."
+  (let ((params (list :textDocument (list :uri (dimfort--uri-of buf)))))
+    (dimfort--panel-rpc
+     buf "textDocument/documentSymbol" params
+     (lambda (_result)
+       (when (buffer-live-p buf)
+         (with-current-buffer buf
+           ;; Panel: cursor-position params + dimfort/panelInfo request.
+           (ignore-errors (dimfort--panel-refresh))
+           ;; File-coverage stats: refresh active-file's footer File:
+           ;; segment.  Without this, the segment carries the prior
+           ;; server's numbers until the user edits the buffer.
+           (ignore-errors (dimfort--coverage-stats-refresh-active))))))))
 
 ;;;###autoload
 (defun dimfort-check-workspace ()
