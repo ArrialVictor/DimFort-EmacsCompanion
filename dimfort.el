@@ -2469,7 +2469,12 @@ source's file-coverage cache updates asynchronously.")
                             "File"
                             (if (and ws stale) "Project (stale)" "Project")))
             (insert (make-string 38 ?─) "\n")
-            (insert (format "  Coverage      %-10s%s\n"
+            ;; Coverage line gets a 3-cell prefix to match the emoji-
+            ;; bearing tier rows below: the bullet column is 2 display
+            ;; cells (🟢 / 🟡 / 🔴 / 🔵) + 1 trailing space, so plain
+            ;; spaces here need to total 3 cells for the labels to share
+            ;; a baseline. Mirrors the VSCompanion fix (4242763).
+            (insert (format "   Coverage     %-10s%s\n"
                             (pct file) (pct ws)))
             (insert (format "🟢 Verified     %-10s%s\n"
                             (cell file :ok) (cell ws :ok)))
