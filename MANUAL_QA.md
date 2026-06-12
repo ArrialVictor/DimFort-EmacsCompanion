@@ -792,6 +792,58 @@ visible.
       VSCompanion's `dimfort.clearCache` and Nvim's
       `:DimFortClearCache`.
 
+### `M-x dimfort-open-config` (0.2.6)
+
+These checks need a **fresh project folder** with no
+`.dimfort.toml` and no `units.toml`. `M-x cd` into an empty
+directory (and ensure the buffer's `default-directory` reflects
+it) before each subsection.
+
+- [ ] **`.dimfort.toml` cold-create** — run `M-x
+      dimfort-open-config`, pick `.dimfort.toml`. A new
+      `.dimfort.toml` appears at the project root, opens in
+      a buffer, and contains a commented stub (every section
+      header present but commented). Echo area reads
+      `DimFort: created <path>/.dimfort.toml`.
+
+- [ ] **`.dimfort.toml` warm-open** — run again, pick
+      `.dimfort.toml`. Opens the existing file with no
+      modification. No "created" echo.
+
+- [ ] **Units file empty cold-create** — run `M-x
+      dimfort-open-config`, pick `Project units file`. A
+      `completing-read` shows `Empty template` and
+      `Defaults as reference (all commented out)`. Pick
+      `Empty template`. A new `units.toml` appears, opens,
+      and contains the empty-template stub. A new
+      `.dimfort.toml` appears alongside with
+      `[units]\nfile = "units.toml"`. Echo area: `DimFort:
+      created units.toml + wired into .dimfort.toml`.
+
+- [ ] **Units file defaults cold-create** — same as above
+      but pick `Defaults as reference (all commented out)`.
+      The file's `[base]` / `[prefixes]` / `[derived]`
+      sections are all present but each line is prefixed
+      with `# `.
+
+- [ ] **Auto-wire appends `[units]` to existing
+      `.dimfort.toml`** — pre-create a `.dimfort.toml`
+      containing only `[diagnostics]\nH001 = "off"\n` (no
+      `[units]`). Run `M-x dimfort-open-config`, pick
+      `Project units file`. After creation, the existing
+      `.dimfort.toml` is appended with
+      `[units]\nfile = "units.toml"`. Original sections
+      preserved.
+
+- [ ] **Edge case: existing `[units]` section** —
+      pre-create a `.dimfort.toml` containing
+      `[units]\nother_key = "value"\n`. Run + pick units
+      file. After creation, echo area shows: `DimFort:
+      created units.toml. Your .dimfort.toml already has a
+      [units] section — add 'file = "units.toml"' under it
+      to enable the new file.`. The `.dimfort.toml` is
+      **not** modified.
+
 ### Command rename: `dimfort-toggle-panel` (0.2.6)
 
 - [ ] **Renamed from `dimfort-panel-toggle`** for cross-companion
