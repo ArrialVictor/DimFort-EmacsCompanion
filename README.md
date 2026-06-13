@@ -94,13 +94,15 @@ All variables live under `M-x customize-group RET dimfort`:
 | `M-x dimfort-open-config`        | Quick-pick between `dimfort.toml` (workspace config) and the project units file. Each opens if it exists, or creates a commented stub if not. When creating a units file: sub-pick `Empty file` or `Reference template (bundled defaults, all commented out)`. Auto-wires `[units].file = "units.toml"` into `dimfort.toml`. |
 | `M-x dimfort-cycle-scale`        | Cycle scale checking (`auto` → `on` → `off`); `auto` defers to `dimfort.toml`. |
 | `M-x dimfort-cycle-coverage`     | Cycle coverage visualisation (`disabled` → `gutter` → `background`); companion-only, no LSP restart. |
-| `M-x dimfort-toggle-panel`       | Toggle the cursor-following side panel. |
-| `M-x dimfort-panel-open` / `-close` | Open / close the side panel.                 |
+| `M-x dimfort-toggle-panel`       | Toggle the cursor-following side panel.       |
 | `M-x dimfort-toggle-cursor`      | Show / hide the Cursor section (Expression / Diagnostics / Interactions / Actions). |
 | `M-x dimfort-toggle-scope`       | Show / hide the Scope section. |
 | `M-x dimfort-toggle-imports`     | Show / hide the Imports section. |
 | `M-x dimfort-scope-filter`       | Filter the panel's Scope section by name/unit (empty clears). |
 | `M-x dimfort-imports-filter`     | Filter the panel's Imports section by name/unit/module (empty clears). |
+| `M-x dimfort-cycle-sort-mode`    | Cycle the panel sort mode shared by Scope and Imports (`line` → `alphabetic` → `status`). |
+| `M-x dimfort-cycle-unit-display` | Cycle the unit-display mode shared by Scope and Imports (`input` → `canonical` → `both`). |
+| `M-x dimfort-coverage-report`    | Open a buffer with the per-tier coverage breakdown (Verified / Unverified / Violation / Unparsed, for both file and project scope). Press `q` to close. |
 
 ## Side panel
 
