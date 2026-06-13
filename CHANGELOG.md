@@ -8,6 +8,140 @@ behavioural changes mostly land in the DimFort server itself. Entries
 below cover client-side changes only (eglot/lsp-mode wiring, commands,
 defaults, packaging).
 
+## [0.2.6] — 2026-06-13
+
+### Highlight
+
+Cross-companion parity + post-restart panel-population fix release.
+Three threads:
+
+1. **Sort + unit-display modes on the side panel** — feature parity
+   with VSCompanion and Nvim. Scope and Imports sections now carry
+   per-section sort mode (`line` / `alphabetic` / `status`) and
+   per-section unit-display mode (`input` / `canonical` / `both`),
+   cycled via new `M-x dimfort-cycle-…` commands.
+
+2. **`M-x dimfort-coverage-report` and `M-x dimfort-open-config`** —
+   matching the new commands in VSCompanion and Nvim. Same surface,
+   same UX, same sub-pick behaviour for the missing-config case.
+
+3. **Post-restart panel population.** Two layered fixes for an
+   eglot-specific race that left the side panel showing empty
+   sections after `M-x dimfort-cycle-*` commands, until the user
+   moved the cursor several times: (a) wait for the eglot
+   `initialize` handshake to complete before firing the post-
+   restart refresh; (b) probe `textDocument/documentSymbol` after
+   that, to ensure the server has processed the `textDocument/
+   didOpen` for the source buffer before asking for panel content.
+   Born from in-editor smoke testing during the 0.2.6 cycle; both
+   PRs (#25 + #26 in this repo) target Emacs specifically — Nvim
+   doesn't see the race because `vim.lsp.buf_request` queues
+   requests until the server is ready.
+
+### Recommended server version
+
+Pair this companion with DimFort **0.2.6+**. The workspace-check
+wire-protocol command renamed from `dimfort.checkWorkspace` (dot)
+to `dimfort/checkWorkspace` (slash) server-side; this companion now
+sends the slash form on both the eglot and lsp-mode paths. Earlier
+servers (0.2.5 and below) accept both for one release as a soft-
+migration window, but pairing with 0.2.6+ gets you the new
+workspace-less / index-not-ready toasts and the `[N/5]`
+workspace-check progress phase counter — neither of which is
+client-side.
+
+### Added
+
+- **`M-x dimfort-open-config`** — opens the project `dimfort.toml`
+  if present, the project units file if present, or pops a sub-pick
+  for the missing-file case (Empty file / Reference template).
+  Matches `DimFort: Open Config…` (VSCode) and `:DimFortOpenConfig`
+  (Nvim) exactly.
+
+- **`M-x dimfort-coverage-report`** — buffer with the per-tier
+  coverage breakdown (Verified / Unverified / Violation / Unparsed,
+  for both file and project scope). Same content as VSCompanion's
+  status-bar tooltip and Nvim's floating window. Press `q` to
+  close.
+
+- **Sort + unit-display modes on the panel.** Both Scope and Imports
+  sections now respond to `M-x dimfort-cycle-sort-mode` (line /
+  alphabetic / status) and `M-x dimfort-cycle-unit-display` (input
+  / canonical / both). Defaults: sort = `line`, unit-display =
+  `canonical`. Mirrors VSCompanion's title-bar controls and Nvim's
+  `:DimFort…` commands.
+
+- **MANUAL_QA additions** — extra QA fixtures covering the new
+  panel surfaces (sort modes, unit-display modes, coverage report)
+  plus the cross-companion command audit set.
+
+### Changed
+
+- **Wire-protocol command** — `M-x dimfort-check-workspace` now
+  sends `dimfort/checkWorkspace` (slash) instead of
+  `dimfort.checkWorkspace` (dot) on both the eglot and lsp-mode
+  paths. Cosmetic on the client. Requires DimFort 0.2.5+ to receive.
+
+- **`dimfort-panel-open` / `dimfort-panel-close` / `dimfort-panel-
+  activate` demoted to internal helpers** (`dimfort--panel-open` /
+  `dimfort--panel-close` / `dimfort--panel-activate`). The
+  user-facing entry point is `M-x dimfort-toggle-panel`, per the
+  canonical commands table; the three helpers were exposed as
+  public commands but never documented as such. The toggle still
+  delegates to them; the demotion just removes the
+  `;;;###autoload` markers so they don't pollute `M-x` completion
+  for users. Any custom keybindings calling the old names continue
+  to work (the functions themselves remain `interactive`); rebinding
+  to the new `dimfort--…` names is recommended but not required.
+
+### Fixed
+
+- **Post-restart panel-population race (PR #25).** The pre-fix
+  `dimfort--restart-have-server-p` predicate returned truthy as
+  soon as `eglot-current-server` returned the server object —
+  which happens at process spawn, before the LSP `initialize`
+  handshake completes. The single post-restart refresh fired in
+  that window, the request was silently swallowed by our
+  `ignore-errors` wrapper, and the panel stayed at the dimmed
+  pre-restart cache until the next cursor motion. Probe
+  capabilities (`eglot-server-capable`) before firing the
+  refresh — capabilities only appear after the initialize
+  handshake completes. Fall back to internal
+  `eglot--server-capable` on older eglot.
+
+- **Post-restart panel-population race, layer 2 (PR #26).** Even
+  after initialize completes, eglot still has to send
+  `textDocument/didOpen` for every managed buffer before the
+  server has the document content. A `dimfort/panelInfo` request
+  in that gap returns a valid-but-empty payload — the panel
+  renders every section but each shows `(none)`. Probe
+  `textDocument/documentSymbol` as a gate (LSP guarantees
+  in-order per-stream processing, so when documentSymbol
+  returns, didOpen has landed); then fire the real refresh.
+
+- **Coverage footer alignment in `M-x dimfort-coverage-report`.**
+  The `Coverage` label sat one display cell to the left of the
+  bulleted tier labels (🟢 Verified / 🟡 Unverified / 🔴
+  Violation / 🔵 Unparsed) — fixed by reserving a 3-cell bullet
+  column so all five labels share a baseline.
+
+- **Footer flash on empty response.** Pre-fix, the file-coverage
+  cache was cleared on empty `dimfort/coverageStats` responses,
+  causing a brief "Footer: –" flash before the real numbers
+  arrived. Now the cache is preserved across empty responses;
+  only legitimate cache invalidations clear it.
+
+- **Footer File-stats primed on attach, not on first coverage-
+  mode toggle.** Pre-fix, the file-stats refresh was bound to
+  `dimfort-coverage-mode != disabled` — users with the default
+  `disabled` setting never saw their file-stats populate. Now
+  primed at attach time independent of coverage-mode.
+
+### Docs
+
+- **Pre-release docs audit** caught: `.dimfort.toml` → `dimfort.toml`
+  rename straggler in the bug-report template HTML comment.
+
 ## [0.2.5] — 2026-06-09
 
 ### Recommended server version
