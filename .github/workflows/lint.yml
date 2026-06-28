@@ -22,18 +22,43 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # Stay close to the floor declared by Package-Requires.
-        # Adding a newer version is cheap if regressions surface.
-        emacs_version: ["29.1"]
+    # No ``strategy.matrix`` — the apt install path below picks up
+    # whatever Emacs ships with ``ubuntu-latest``. The original
+    # single-value matrix (``emacs_version: ["29.1"]``) was a stale
+    # pin from the Nix-based setup; with apt, there's nothing to
+    # parameterise. Dropping the matrix also keeps the GitHub check
+    # name as the plain ``lint`` (not ``lint (29.1)``) so the
+    # required-status-checks rule in branch protection can name it
+    # exactly — GitHub's ``(any source)`` notation is a source-
+    # wildcard, not a matrix-name pattern.
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Emacs
-        uses: purcell/setup-emacs@master
-        with:
-          version: ${{ matrix.emacs_version }}
+      # Install Emacs from the runner's Ubuntu apt repository
+      # (currently emacs-nox 29.x on ubuntu-latest). Replaces the
+      # Nix-based ``purcell/setup-emacs`` / ``jcs090218/setup-emacs``
+      # actions, both of which share an underlying mechanism that
+      # polls ``api.github.com/repos/purcell/nix-emacs-ci/commits/HEAD``
+      # on every run. When the GitHub API rate-limits unauthenticated
+      # requests (HTTP 429), the Nix tooling chokes on the throttle
+      # response ("parse error at line 1, column 1: ... invalid
+      # literal '<U+001F>'") and the setup step fails before Emacs is
+      # ever installed. This blocked PR #32 twice and PR #33 once on
+      # 2026-06-28 — purely intermittent infrastructure flake, but
+      # one that blocks branch-protected merges.
+      #
+      # ``apt-get install emacs-nox`` has no external API
+      # dependencies on the hot path — packages are mirrored to the
+      # runner's apt cache. The runner installs whatever Emacs ships
+      # with its Ubuntu image (29.x on ubuntu-latest at time of
+      # writing). For DimFort's lint job — byte-compile + package-
+      # lint — any reasonably current Emacs satisfies; we lost
+      # precise version pinning but gained reliability.
+      - name: Set up Emacs (from runner system package)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y emacs-nox
+          emacs --version
 
       - name: Install package-lint
         run: |
