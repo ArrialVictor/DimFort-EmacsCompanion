@@ -450,17 +450,13 @@ of which LSP backend asked)."
               #'dimfort--install-server-exit-sentinel)
     ;; audited(0.2.7): error-surfacing (startup case) — the
     ;; managed-mode hook above only fires for SUCCESSFUL attaches.
-    ;; A server that dies before the initialize handshake completes
-    ;; (the missing-`lsp'-extra case from DimFort PR #112, or any
-    ;; pre-handshake Python crash) never reaches managed-mode, so
-    ;; the sentinel wrap there never runs. Advise `eglot--connect'
-    ;; to catch startup failures separately, filter to DimFort
-    ;; modes so we don't claim "DimFort" on unrelated eglot errors,
-    ;; and re-signal so eglot's own error path continues.
-    (unless (advice-member-p
-             #'dimfort--eglot-connect-startup-advice 'eglot--connect)
-      (advice-add 'eglot--connect :around
-                  #'dimfort--eglot-connect-startup-advice))))
+    ;; The startup-failure advice on eglot--connect is installed
+    ;; eagerly at file-load time via `with-eval-after-load' (below
+    ;; this defun, alongside the package's load-time setup) so
+    ;; users who run `M-x eglot' without ever calling
+    ;; `dimfort-setup' still get the actionable startup-failure
+    ;; message. Installing it here too would be redundant.
+    ))
 
 (defvar dimfort--warned-server-exits (make-hash-table :test 'equal)
   "Per-(code, signal-name) dedup memo for the unexpected-exit
@@ -569,6 +565,20 @@ one DimFort Fortran mode is in there."
      ;; Re-raise so eglot's own error path continues — we surface
      ;; context, we don't suppress.
      (signal (car err) (cdr err)))))
+
+;; Install the startup-failure advice eagerly at file-load time, not
+;; lazily in `dimfort--eglot-setup'. Users routinely call `M-x eglot'
+;; (or have eglot auto-attach via `eglot-ensure' in a major-mode hook)
+;; without ever calling `dimfort-setup' explicitly — the lazy path
+;; would miss every one of them and leave the missing-`lsp'-extra and
+;; pre-handshake-crash cases silent. `with-eval-after-load' fires once
+;; eglot is loaded (or immediately if it already is); the
+;; `advice-member-p' guard inside makes the install idempotent.
+(with-eval-after-load 'eglot
+  (unless (advice-member-p
+           #'dimfort--eglot-connect-startup-advice 'eglot--connect)
+    (advice-add 'eglot--connect :around
+                #'dimfort--eglot-connect-startup-advice)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept DimFort commands on Emacs 29's `eglot-execute-command' path."
