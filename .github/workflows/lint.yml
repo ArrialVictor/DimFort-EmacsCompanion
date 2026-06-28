@@ -22,11 +22,15 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # Stay close to the floor declared by Package-Requires.
-        # Adding a newer version is cheap if regressions surface.
-        emacs_version: ["29.1"]
+    # No ``strategy.matrix`` — the apt install path below picks up
+    # whatever Emacs ships with ``ubuntu-latest``. The original
+    # single-value matrix (``emacs_version: ["29.1"]``) was a stale
+    # pin from the Nix-based setup; with apt, there's nothing to
+    # parameterise. Dropping the matrix also keeps the GitHub check
+    # name as the plain ``lint`` (not ``lint (29.1)``) so the
+    # required-status-checks rule in branch protection can name it
+    # exactly — GitHub's ``(any source)`` notation is a source-
+    # wildcard, not a matrix-name pattern.
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +49,11 @@ jobs:
       #
       # ``apt-get install emacs-nox`` has no external API
       # dependencies on the hot path — packages are mirrored to the
-      # runner's apt cache. The ``matrix.emacs_version`` value is now
-      # informational (a label, not a pin); the runner installs
-      # whatever Emacs ships with its Ubuntu image. For DimFort's
-      # lint job — byte-compile + package-lint — any reasonably
-      # current Emacs satisfies; we lost precise version pinning
-      # but gained reliability.
+      # runner's apt cache. The runner installs whatever Emacs ships
+      # with its Ubuntu image (29.x on ubuntu-latest at time of
+      # writing). For DimFort's lint job — byte-compile + package-
+      # lint — any reasonably current Emacs satisfies; we lost
+      # precise version pinning but gained reliability.
       - name: Set up Emacs (from runner system package)
         run: |
           sudo apt-get update
