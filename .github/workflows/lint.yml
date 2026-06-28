@@ -30,8 +30,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ``purcell/setup-emacs@master`` uses a Nix-based install path
+      # that polls ``api.github.com`` on every run to resolve the
+      # latest commit on ``nix-emacs-ci``. When the GitHub API is
+      # under load and unauthenticated requests hit the rate limit
+      # (HTTP 429), the Nix tooling chokes on the throttle response
+      # ("parse error at line 1, column 1: ... invalid literal
+      # '<U+001F>'") and the setup step fails before Emacs is ever
+      # installed. This blocked PR #32 twice in a row on 2026-06-28.
+      #
+      # ``jcs090218/setup-emacs@master`` pulls prebuilt Emacs
+      # binaries from a GitHub Release rather than evaluating a Nix
+      # expression — no per-run API resolution, no rate-limit
+      # exposure on the hot path. Same ``with: version:`` arg.
       - name: Set up Emacs
-        uses: purcell/setup-emacs@master
+        uses: jcs090218/setup-emacs@master
         with:
           version: ${{ matrix.emacs_version }}
 
