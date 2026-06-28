@@ -450,13 +450,16 @@ of which LSP backend asked)."
               #'dimfort--install-server-exit-sentinel)
     ;; audited(0.2.7): error-surfacing (startup case) — the
     ;; managed-mode hook above only fires for SUCCESSFUL attaches.
-    ;; The startup-failure advice on eglot--connect is installed
-    ;; eagerly at file-load time via `with-eval-after-load' (below
-    ;; this defun, alongside the package's load-time setup) so
-    ;; users who run `M-x eglot' without ever calling
-    ;; `dimfort-setup' still get the actionable startup-failure
-    ;; message. Installing it here too would be redundant.
-    ))
+    ;; A server that dies before the initialize handshake completes
+    ;; (missing `lsp' extra, or any pre-handshake Python crash)
+    ;; never reaches managed-mode. Install an :around advice on
+    ;; `eglot--connect' to catch that path separately. Idempotent
+    ;; via `advice-member-p'. Eglot is loaded above (`require'),
+    ;; so it's safe to advice the function directly here.
+    (unless (advice-member-p
+             #'dimfort--eglot-connect-startup-advice 'eglot--connect)
+      (advice-add 'eglot--connect :around
+                  #'dimfort--eglot-connect-startup-advice))))
 
 (defvar dimfort--warned-server-exits (make-hash-table :test 'equal)
   "Per-(code, signal-name) dedup memo for the unexpected-exit
@@ -583,19 +586,6 @@ one DimFort Fortran mode is in there."
      ;; context, we don't suppress.
      (signal (car err) (cdr err)))))
 
-;; Install the startup-failure advice eagerly at file-load time, not
-;; lazily in `dimfort--eglot-setup'. Users routinely call `M-x eglot'
-;; (or have eglot auto-attach via `eglot-ensure' in a major-mode hook)
-;; without ever calling `dimfort-setup' explicitly — the lazy path
-;; would miss every one of them and leave the missing-`lsp'-extra and
-;; pre-handshake-crash cases silent. `with-eval-after-load' fires once
-;; eglot is loaded (or immediately if it already is); the
-;; `advice-member-p' guard inside makes the install idempotent.
-(with-eval-after-load 'eglot
-  (unless (advice-member-p
-           #'dimfort--eglot-connect-startup-advice 'eglot--connect)
-    (advice-add 'eglot--connect :around
-                #'dimfort--eglot-connect-startup-advice)))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept DimFort commands on Emacs 29's `eglot-execute-command' path."
@@ -702,8 +692,27 @@ any action that has no command of ours) to eglot's default handling."
 (defun dimfort-setup ()
   "Register DimFort with whichever LSP front-end is loaded.
 
-Safe to call multiple times — both eglot and lsp-mode registrations
-de-duplicate by server-id / mode."
+Adds the Fortran modes to ``eglot-server-programs`` (or
+``lsp-language-id-configuration`` for lsp-mode), installs the
+post-attach side-panel auto-open hook, and wires the
+startup-failure / mid-session-exit notifications so a server
+crash surfaces as a ``*Warnings*` entry instead of vanishing
+silently.
+
+**Must be called for the LSP integration to work.** The
+two documented setup patterns both invoke it:
+
+  (require \\='dimfort)
+  (dimfort-setup)
+
+  ;; or via use-package:
+  (use-package dimfort
+    :hook ((f90-mode . dimfort-setup)
+           (fortran-mode . dimfort-setup)))
+
+Safe to call multiple times — both eglot and lsp-mode
+registrations de-duplicate by server-id / mode, and the advice
+installs guard via ``advice-member-p``."
   (interactive)
   (dimfort--eglot-setup)
   (dimfort--lsp-mode-setup))
