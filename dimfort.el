@@ -441,13 +441,26 @@ of which LSP backend asked)."
     (add-hook 'eglot-managed-mode-hook
               #'dimfort--coverage-on-attach)
     ;; audited(0.2.7): error-surfacing — wrap the server process's
-    ;; sentinel so an unexpected exit (segfault, ImportError on the
-    ;; missing `lsp' extra, Python crash mid-handler, etc.)
-    ;; surfaces as a DimFort `message' instead of just a passive
-    ;; modeline indicator. Matches the Nvim companion's on_exit
-    ;; handler and the planned VSCompanion onDidChangeState wiring.
+    ;; sentinel so a MID-SESSION exit (segfault, Python crash
+    ;; mid-handler, SIGKILL via pkill, etc.) surfaces as a DimFort
+    ;; `message' instead of just a passive modeline indicator.
+    ;; Matches the Nvim companion's on_exit handler and the planned
+    ;; VSCompanion onDidChangeState wiring.
     (add-hook 'eglot-managed-mode-hook
-              #'dimfort--install-server-exit-sentinel)))
+              #'dimfort--install-server-exit-sentinel)
+    ;; audited(0.2.7): error-surfacing (startup case) — the
+    ;; managed-mode hook above only fires for SUCCESSFUL attaches.
+    ;; A server that dies before the initialize handshake completes
+    ;; (the missing-`lsp'-extra case from DimFort PR #112, or any
+    ;; pre-handshake Python crash) never reaches managed-mode, so
+    ;; the sentinel wrap there never runs. Advise `eglot--connect'
+    ;; to catch startup failures separately, filter to DimFort
+    ;; modes so we don't claim "DimFort" on unrelated eglot errors,
+    ;; and re-signal so eglot's own error path continues.
+    (unless (advice-member-p
+             #'dimfort--eglot-connect-startup-advice 'eglot--connect)
+      (advice-add 'eglot--connect :around
+                  #'dimfort--eglot-connect-startup-advice))))
 
 (defvar dimfort--warned-server-exits (make-hash-table :test 'equal)
   "Per-(code, signal-name) dedup memo for the unexpected-exit
@@ -520,6 +533,42 @@ notification."
                    "(pipx install 'dimfort[lsp]') or a Python crash "
                    "mid-handler.")
            evt))))))
+
+(defun dimfort--eglot-connect-startup-advice (orig managed-modes &rest rest)
+  "Catch startup failures of the DimFort LSP, surface DimFort message.
+
+Wraps `eglot--connect' (the internal eglot entry point that spawns
+the LSP process + does the initialize handshake). When the spawn
+fails or the server dies before initialize completes, eglot signals
+an error like `[eglot] -1 : server died' — which says nothing about
+the actual cause. This advice catches that error path, filters to
+DimFort modes only (so we don't claim \"DimFort\" on a Python LSP
+failure), surfaces a DimFort-prefixed `message' naming the most
+common causes, then re-signals so eglot's own error handling
+continues unchanged.
+
+MANAGED-MODES is `eglot--connect's first arg — a list of major
+modes the new server will handle.  We only intervene when at least
+one DimFort Fortran mode is in there."
+  (condition-case err
+      (apply orig managed-modes rest)
+    (error
+     (when (cl-intersection managed-modes dimfort-fortran-modes)
+       (let* ((evt (error-message-string err))
+              (key (concat "connect:" evt)))
+         (unless (gethash key dimfort--warned-server-exits)
+           (puthash key t dimfort--warned-server-exits)
+           (message
+            (concat "DimFort: LSP failed to start (%s). "
+                    "Common causes: missing 'lsp' extra "
+                    "(pipx install 'dimfort[lsp]'), or a Python "
+                    "crash before the initialize handshake "
+                    "completes. See `*EGLOT events*' for the "
+                    "underlying traceback.")
+            evt))))
+     ;; Re-raise so eglot's own error path continues — we surface
+     ;; context, we don't suppress.
+     (signal (car err) (cdr err)))))
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept DimFort commands on Emacs 29's `eglot-execute-command' path."
