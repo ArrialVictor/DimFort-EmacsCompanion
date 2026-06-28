@@ -30,23 +30,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ``purcell/setup-emacs@master`` uses a Nix-based install path
-      # that polls ``api.github.com`` on every run to resolve the
-      # latest commit on ``nix-emacs-ci``. When the GitHub API is
-      # under load and unauthenticated requests hit the rate limit
-      # (HTTP 429), the Nix tooling chokes on the throttle response
-      # ("parse error at line 1, column 1: ... invalid literal
-      # '<U+001F>'") and the setup step fails before Emacs is ever
-      # installed. This blocked PR #32 twice in a row on 2026-06-28.
+      # Install Emacs from the runner's Ubuntu apt repository
+      # (currently emacs-nox 29.x on ubuntu-latest). Replaces the
+      # Nix-based ``purcell/setup-emacs`` / ``jcs090218/setup-emacs``
+      # actions, both of which share an underlying mechanism that
+      # polls ``api.github.com/repos/purcell/nix-emacs-ci/commits/HEAD``
+      # on every run. When the GitHub API rate-limits unauthenticated
+      # requests (HTTP 429), the Nix tooling chokes on the throttle
+      # response ("parse error at line 1, column 1: ... invalid
+      # literal '<U+001F>'") and the setup step fails before Emacs is
+      # ever installed. This blocked PR #32 twice and PR #33 once on
+      # 2026-06-28 — purely intermittent infrastructure flake, but
+      # one that blocks branch-protected merges.
       #
-      # ``jcs090218/setup-emacs@master`` pulls prebuilt Emacs
-      # binaries from a GitHub Release rather than evaluating a Nix
-      # expression — no per-run API resolution, no rate-limit
-      # exposure on the hot path. Same ``with: version:`` arg.
-      - name: Set up Emacs
-        uses: jcs090218/setup-emacs@master
-        with:
-          version: ${{ matrix.emacs_version }}
+      # ``apt-get install emacs-nox`` has no external API
+      # dependencies on the hot path — packages are mirrored to the
+      # runner's apt cache. The ``matrix.emacs_version`` value is now
+      # informational (a label, not a pin); the runner installs
+      # whatever Emacs ships with its Ubuntu image. For DimFort's
+      # lint job — byte-compile + package-lint — any reasonably
+      # current Emacs satisfies; we lost precise version pinning
+      # but gained reliability.
+      - name: Set up Emacs (from runner system package)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y emacs-nox
+          emacs --version
 
       - name: Install package-lint
         run: |
