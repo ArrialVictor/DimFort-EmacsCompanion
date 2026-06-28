@@ -522,13 +522,22 @@ notification."
       (let ((key (concat (process-name process) ":" evt)))
         (unless (gethash key dimfort--warned-server-exits)
           (puthash key t dimfort--warned-server-exits)
-          (message
-           (concat "DimFort: LSP server exited unexpectedly (%s). "
-                   "Check `*EGLOT events*' / `*Messages*' for details; "
-                   "common causes include a missing 'lsp' extra "
-                   "(pipx install 'dimfort[lsp]') or a Python crash "
-                   "mid-handler.")
-           evt))))))
+          ;; ``display-warning' rather than ``message' so the
+          ;; DimFort-actionable notice doesn't get displaced from
+          ;; the minibuffer by eglot's own "Server died" message
+          ;; firing in the same tick (`message' overwrites; only
+          ;; the loser stays visible).  ``*Warnings*' pops up on
+          ;; its own and stays open until the user dismisses it.
+          (display-warning
+           'dimfort
+           (format
+            (concat "LSP server exited unexpectedly (%s). "
+                    "Check `*EGLOT events*' / `*Messages*' for "
+                    "details; common causes include a missing "
+                    "'lsp' extra (pipx install 'dimfort[lsp]') "
+                    "or a Python crash mid-handler.")
+            evt)
+           :warning))))))
 
 (defun dimfort--eglot-connect-startup-advice (orig managed-modes &rest rest)
   "Catch startup failures of the DimFort LSP, surface DimFort message.
@@ -554,14 +563,22 @@ one DimFort Fortran mode is in there."
               (key (concat "connect:" evt)))
          (unless (gethash key dimfort--warned-server-exits)
            (puthash key t dimfort--warned-server-exits)
-           (message
-            (concat "DimFort: LSP failed to start (%s). "
-                    "Common causes: missing 'lsp' extra "
-                    "(pipx install 'dimfort[lsp]'), or a Python "
-                    "crash before the initialize handshake "
-                    "completes. See `*EGLOT events*' for the "
-                    "underlying traceback.")
-            evt))))
+           ;; ``display-warning' rather than ``message' so the
+           ;; actionable notice doesn't get displaced from the
+           ;; minibuffer by eglot's own "Server died" message
+           ;; firing in the same tick.  ``*Warnings*' pops up on
+           ;; its own and stays open until dismissed.
+           (display-warning
+            'dimfort
+            (format
+             (concat "LSP failed to start (%s).  Common causes: "
+                     "missing 'lsp' extra (pipx install "
+                     "'dimfort[lsp]'), or a Python crash before "
+                     "the initialize handshake completes.  See "
+                     "`*EGLOT events*' for the underlying "
+                     "traceback.")
+             evt)
+            :warning))))
      ;; Re-raise so eglot's own error path continues — we surface
      ;; context, we don't suppress.
      (signal (car err) (cdr err)))))
