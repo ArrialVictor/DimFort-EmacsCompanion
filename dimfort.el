@@ -257,6 +257,84 @@ Position objects (plist under eglot, hash-table under lsp-mode)."
 (defvar dimfort--panel-source-buffer)
 
 
+;;; Workspace-root detection
+;;
+;; Mirrors the cross-companion `dimfort.toml`-only marker policy
+;; introduced in 0.2.7 (Nvim and VSCompanion equivalents land
+;; alongside). Adds a custom entry to `project-find-functions' that
+;; walks upward from the active file looking for a `dimfort.toml',
+;; returning a `transient' project rooted there when found. Falls
+;; through to project.el's existing chain (e.g. `project-try-vc') when
+;; no `dimfort.toml' is upstream — that path keeps working unchanged
+;; for projects without a `dimfort.toml'.
+;;
+;; The companion also emits a one-time `message' warning when the
+;; upward walk encounters a second `dimfort.toml' above the chosen
+;; one — typically signals an unintended sub-project or configuration
+;; drift. Per-root deduped so the warning fires at most once per
+;; workspace per session. Only fires for `dimfort.toml' specifically;
+;; the implementation never warns about duplicate `.git' directories
+;; upstream (the user's home or a personal-projects parent — noise,
+;; not signal).
+
+(defvar dimfort--root-source nil
+  "Identifier for the marker that anchored the last resolved workspace
+root. Set to the string `\"dimfort.toml\"' when our custom
+`project-find-functions' entry matched, or `nil' when project.el's
+default chain handled the resolution (or no project was found at all).
+The panel footer reads this via `dimfort--root-source-tag'.")
+
+(defvar dimfort--warned-nested-roots (make-hash-table :test 'equal)
+  "Per-root memo of nested-`dimfort.toml' warnings so the same root
+never warns twice in one session.")
+
+(defun dimfort--root-source-tag ()
+  "Return a parenthesised source tag for the panel footer.
+
+Returns `\"(dimfort.toml)\"' when our project-find-function anchored
+the active project; empty string otherwise (project.el's default chain
+won, or no project was found). The panel appends this verbatim to the
+`Project:' line — empty string renders as no tag, which is the correct
+behaviour when we don't have something specific to report."
+  (if dimfort--root-source
+      (format " (%s)" dimfort--root-source)
+    ""))
+
+(defun dimfort--find-project (dir)
+  "Custom `project-find-functions' entry preferring `dimfort.toml'.
+
+Walks upward from DIR looking for `dimfort.toml'. Returns a
+`(transient . ROOT)' cons cell when found (project.el's
+documented format for ad-hoc transient projects), or `nil' to let
+the next entry in `project-find-functions' attempt to match.
+
+Sets `dimfort--root-source' as a side effect so the panel can surface
+the marker. Emits a deduped `message' when a second `dimfort.toml'
+exists above the chosen one — see the section header for the
+deduplication contract."
+  (when-let* ((found (locate-dominating-file dir "dimfort.toml")))
+    (let* ((root (expand-file-name found))
+           (root-toml (expand-file-name "dimfort.toml" root)))
+      (setq dimfort--root-source "dimfort.toml")
+      ;; Nested-`dimfort.toml' check: walk one directory above the
+      ;; resolved root and see if another `dimfort.toml' lives there.
+      ;; One-time per root via the hash-table memo.
+      (let* ((parent (file-name-directory (directory-file-name root)))
+             (above (and parent
+                         (not (equal parent root))
+                         (locate-dominating-file parent "dimfort.toml"))))
+        (when (and above
+                   (not (gethash root dimfort--warned-nested-roots)))
+          (puthash root t dimfort--warned-nested-roots)
+          (message
+           (concat "DimFort: found dimfort.toml at %s; note another "
+                   "exists at %s above. The lower one is in effect — "
+                   "the upper one is ignored.")
+           root-toml
+           (expand-file-name "dimfort.toml" above))))
+      (cons 'transient root))))
+
+
 ;;; eglot integration
 
 (defvar eglot-server-programs)
@@ -313,9 +391,19 @@ server restart)."
   (run-at-time dimfort-inlay-refresh-delay nil
                #'dimfort--force-inlay-refresh))
 
+(defun dimfort--register-project-finder ()
+  "Add the `dimfort.toml'-aware entry to `project-find-functions'.
+
+Idempotent — `add-hook' deduplicates. Called from both the eglot
+and lsp-mode setup paths since the finder is LSP-client-agnostic
+(it's a project.el hook, surfaces in `project-current' regardless
+of which LSP backend asked)."
+  (add-hook 'project-find-functions #'dimfort--find-project))
+
 (defun dimfort--eglot-setup ()
   "Register DimFort with eglot."
   (when (require 'eglot nil t)
+    (dimfort--register-project-finder)
     ;; eglot reads server initialization options from
     ;; `eglot-workspace-configuration' or from the `:initializationOptions'
     ;; the contact-class provides. The simplest path that mirrors VSCode
@@ -416,6 +504,7 @@ any action that has no command of ours) to eglot's default handling."
 (defun dimfort--lsp-mode-setup ()
   "Register DimFort with lsp-mode (if loaded)."
   (when (featurep 'lsp-mode)
+    (dimfort--register-project-finder)
     ;; Make sure f90/fortran modes are mapped to a known language id.
     (dolist (mode dimfort-fortran-modes)
       (add-to-list 'lsp-language-id-configuration `(,mode . "fortran")))
@@ -1563,19 +1652,23 @@ visible regardless of payload state."
                                 (dimfort--fmt-count (plist-get file :warn))
                                 (dimfort--fmt-count (plist-get file :fire)))
                       (dimfort--dim "File: –")))
+         (root-tag (dimfort--root-source-tag))
          (ws-text (cond
                    (dimfort--ws-refreshing
                     (dimfort--dim
-                     (format "Project: %s" (dimfort--ws-spinner-glyph))))
+                     (concat (format "Project: %s" (dimfort--ws-spinner-glyph))
+                             root-tag)))
                    ((null dimfort--ws-snapshot)
-                    (dimfort--dim "Project: –"))
+                    (dimfort--dim (concat "Project: –" root-tag)))
                    (t
-                    (let ((s (format "Project: %d%% (🟡 %s 🔴 %s)"
-                                     (plist-get dimfort--ws-snapshot :coverage-pct)
-                                     (dimfort--fmt-count
-                                      (plist-get dimfort--ws-snapshot :warn))
-                                     (dimfort--fmt-count
-                                      (plist-get dimfort--ws-snapshot :fire)))))
+                    (let ((s (concat
+                              (format "Project: %d%% (🟡 %s 🔴 %s)"
+                                      (plist-get dimfort--ws-snapshot :coverage-pct)
+                                      (dimfort--fmt-count
+                                       (plist-get dimfort--ws-snapshot :warn))
+                                      (dimfort--fmt-count
+                                       (plist-get dimfort--ws-snapshot :fire)))
+                              root-tag)))
                       (if dimfort--ws-stale (dimfort--dim s) s))))))
     (list (dimfort--cell dimfort--panel-divider)
           (dimfort--cell (concat file-text "   " ws-text)))))

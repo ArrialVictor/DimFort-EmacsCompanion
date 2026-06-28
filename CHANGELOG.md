@@ -8,6 +8,37 @@ behavioural changes mostly land in the DimFort server itself. Entries
 below cover client-side changes only (eglot/lsp-mode wiring, commands,
 defaults, packaging).
 
+## [Unreleased]
+
+### Added
+
+- **Custom `project-find-functions` entry preferring `dimfort.toml`.**
+  When opening a Fortran file, the companion now walks upward from
+  the file looking for a `dimfort.toml` and returns a `transient`
+  project rooted there. This matches the cross-companion unification
+  work in 0.2.7 — `dimfort.toml` is DimFort's project marker and
+  the three companions now agree on its priority. Falls through to
+  project.el's existing chain (`project-try-vc` etc.) when no
+  `dimfort.toml` is upstream, so projects without a `dimfort.toml`
+  keep working exactly as before.
+
+- **Root-source tag in the panel `Project:` line.** The footer now
+  appends `(dimfort.toml)` when our project-finder anchored the
+  workspace — a glance reveals which marker the LSP is using. No
+  tag appears when project.el's default chain handled the
+  resolution (vc-based detection, etc.) since the companion
+  doesn't own that path. Matches the equivalent tags added to
+  the Nvim and VSCompanion companions this cycle, with the
+  Emacs-specific scoping note that we only report on
+  `dimfort.toml`-anchored roots.
+
+- **Nested-`dimfort.toml` warning.** When the upward walk
+  encounters a second `dimfort.toml` above the chosen one, the
+  companion emits a one-time `message' surfacing the drift
+  (typically an unintended sub-project or configuration overlap).
+  Per-root deduped — same root never warns twice in one session.
+  Only fires for `dimfort.toml` specifically.
+
 ## [0.2.6] — 2026-06-13
 
 ### Highlight
