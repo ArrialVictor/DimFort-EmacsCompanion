@@ -12,6 +12,41 @@ defaults, packaging).
 
 ### Added
 
+- **Unexpected LSP-server-exit surfacing (eglot).** The companion now
+  wraps the eglot server's underlying process sentinel via
+  `eglot-managed-mode-hook`. If the server exits abnormally (`exited
+  abnormally with code N`, `killed by signal 9`, etc.) the user sees
+  a `message` naming the event, pointing at `*EGLOT events*` /
+  `*Messages*` for details, with common causes listed (missing
+  `[lsp]` extra, Python crash mid-handler). Clean exits and graceful
+  user-initiated kills (SIGTERM / SIGINT) are skipped. Per-(name,
+  event) deduped via `dimfort--warned-server-exits`. Closes the gap
+  surfaced during [DimFort#112](https://github.com/ArrialVictor/DimFort/pull/112)'s
+  review — server-side friendly error reached terminal users but
+  not companion-using ones who only saw "DimFort LSP not attached."
+  Wraps each server process once via a weak-key `eq` memo so
+  per-buffer hook firings stay idempotent. (lsp-mode users go through
+  a different LSP-error UX — lsp-mode has its own server-died
+  indicators; not implemented since lsp-mode adoption is small.)
+
+### Fixed
+
+- **`workspace/executeCommand` error response now surfaces.** Both
+  the eglot and lsp-mode workspace-check command paths previously
+  `condition-case nil`-wrapped the `eglot-execute-command` /
+  `lsp--send-execute-command` call and silently cleared the spinner
+  on any wire-level error. The user clicked `M-x
+  dimfort-check-workspace`, saw nothing happen, no signal anything
+  was wrong. Both paths now `message` the actual error text on
+  failure. The documented `started: false` server-refusal cases
+  (already in progress / index not ready / no files) stay silent on
+  the companion side — eglot routes the server's
+  `window/showMessage` toast to `*Messages*`, so the user already
+  sees the explanation; double-warning would be noise. Annotated
+  with `audited(0.2.7)` to document the intentional silence.
+
+### Added
+
 - **Custom `project-find-functions` entry preferring `dimfort.toml`.**
   When opening a Fortran file, the companion now walks upward from
   the file looking for a `dimfort.toml` and returns a `transient`

@@ -439,7 +439,153 @@ of which LSP backend asked)."
     ;; per-buffer hooks are still installed so flipping into
     ;; `gutter' / `background' later works without an attach cycle).
     (add-hook 'eglot-managed-mode-hook
-              #'dimfort--coverage-on-attach)))
+              #'dimfort--coverage-on-attach)
+    ;; audited(0.2.7): error-surfacing — wrap the server process's
+    ;; sentinel so a MID-SESSION exit (segfault, Python crash
+    ;; mid-handler, SIGKILL via pkill, etc.) surfaces as a DimFort
+    ;; `message' instead of just a passive modeline indicator.
+    ;; Matches the Nvim companion's on_exit handler and the planned
+    ;; VSCompanion onDidChangeState wiring.
+    (add-hook 'eglot-managed-mode-hook
+              #'dimfort--install-server-exit-sentinel)
+    ;; audited(0.2.7): error-surfacing (startup case) — the
+    ;; managed-mode hook above only fires for SUCCESSFUL attaches.
+    ;; A server that dies before the initialize handshake completes
+    ;; (missing `lsp' extra, or any pre-handshake Python crash)
+    ;; never reaches managed-mode. Install an :around advice on
+    ;; `eglot--connect' to catch that path separately. Idempotent
+    ;; via `advice-member-p'. Eglot is loaded above (`require'),
+    ;; so it's safe to advice the function directly here.
+    (unless (advice-member-p
+             #'dimfort--eglot-connect-startup-advice 'eglot--connect)
+      (advice-add 'eglot--connect :around
+                  #'dimfort--eglot-connect-startup-advice))))
+
+(defvar dimfort--warned-server-exits (make-hash-table :test 'equal)
+  "Per-(code, signal-name) dedup memo for the unexpected-exit
+notification — a rapid-retry crash loop won't carpet the user.")
+
+(defvar dimfort--sentineled-processes (make-hash-table :test 'eq
+                                                       :weakness 'key)
+  "Weak-key memo of server processes we've already wrapped — keeps
+the wrapping idempotent across `eglot-managed-mode-hook' firings,
+which run once per managed buffer (Nvim's on_exit equivalent is
+per-client, but Emacs hooks per-buffer).")
+
+(defun dimfort--install-server-exit-sentinel ()
+  "Wrap the active eglot server's process sentinel for exit detection.
+
+Looks up `eglot-current-server' (no-op for lsp-mode — that path
+would need an `lsp-after-uninitialized-functions' hook instead;
+not implemented since lsp-mode users are a minority and lsp-mode
+has its own server-died UX).
+
+Idempotent: each process is wrapped at most once per Emacs session
+via `dimfort--sentineled-processes'."
+  (when (and (featurep 'eglot)
+             (fboundp 'eglot-current-server))
+    (let ((server (eglot-current-server)))
+      (when (and server
+                 (fboundp 'jsonrpc--process))
+        (let ((proc (jsonrpc--process server)))
+          (when (and (process-live-p proc)
+                     (not (gethash proc dimfort--sentineled-processes)))
+            (puthash proc t dimfort--sentineled-processes)
+            (dimfort--wrap-process-sentinel proc)))))))
+
+(defun dimfort--wrap-process-sentinel (proc)
+  "Wrap PROC's existing sentinel with the dimfort-exit notifier.
+The existing sentinel (eglot's own teardown logic) runs first;
+ours runs after and surfaces unexpected exits."
+  (let ((existing (process-sentinel proc)))
+    (set-process-sentinel
+     proc
+     (lambda (process event)
+       (when existing
+         ;; Eglot's sentinel may raise (e.g., trying to clean up a
+         ;; mode that's already dead); we still need to fire our
+         ;; notification.
+         (ignore-errors (funcall existing process event)))
+       (dimfort--maybe-warn-on-exit process event)))))
+
+(defun dimfort--maybe-warn-on-exit (process event)
+  "Emit a DimFort error message when PROCESS's EVENT is abnormal.
+
+EVENT is a string like `\"finished\\n\"' / `\"exited abnormally with
+code 1\\n\"' / `\"killed by signal 9\\n\"'. Clean exits (\"finished\")
+and user-initiated SIGTERM/SIGINT are skipped — those happen on
+`M-x eglot-shutdown' or `M-x dimfort-restart' and don't warrant a
+notification."
+  (let ((evt (string-trim event)))
+    (when (and (not (process-live-p process))
+               (not (string= evt "finished"))
+               ;; SIGTERM / SIGINT are graceful user-initiated kills.
+               (not (string-match-p "killed by signal 15\\>" evt))
+               (not (string-match-p "killed by signal 2\\>" evt)))
+      (let ((key (concat (process-name process) ":" evt)))
+        (unless (gethash key dimfort--warned-server-exits)
+          (puthash key t dimfort--warned-server-exits)
+          ;; ``display-warning' rather than ``message' so the
+          ;; DimFort-actionable notice doesn't get displaced from
+          ;; the minibuffer by eglot's own "Server died" message
+          ;; firing in the same tick (`message' overwrites; only
+          ;; the loser stays visible).  ``*Warnings*' pops up on
+          ;; its own and stays open until the user dismisses it.
+          (display-warning
+           'dimfort
+           (format
+            (concat "LSP server exited unexpectedly (%s). "
+                    "Check `*EGLOT events*' / `*Messages*' for "
+                    "details; common causes include a missing "
+                    "'lsp' extra (pipx install 'dimfort[lsp]') "
+                    "or a Python crash mid-handler.")
+            evt)
+           :warning))))))
+
+(defun dimfort--eglot-connect-startup-advice (orig managed-modes &rest rest)
+  "Catch startup failures of the DimFort LSP, surface DimFort message.
+
+Wraps `eglot--connect' (the internal eglot entry point that spawns
+the LSP process + does the initialize handshake). When the spawn
+fails or the server dies before initialize completes, eglot signals
+an error like `[eglot] -1 : server died' — which says nothing about
+the actual cause. This advice catches that error path, filters to
+DimFort modes only (so we don't claim \"DimFort\" on a Python LSP
+failure), surfaces a DimFort-prefixed `message' naming the most
+common causes, then re-signals so eglot's own error handling
+continues unchanged.
+
+MANAGED-MODES is `eglot--connect's first arg — a list of major
+modes the new server will handle.  We only intervene when at least
+one DimFort Fortran mode is in there."
+  (condition-case err
+      (apply orig managed-modes rest)
+    (error
+     (when (cl-intersection managed-modes dimfort-fortran-modes)
+       (let* ((evt (error-message-string err))
+              (key (concat "connect:" evt)))
+         (unless (gethash key dimfort--warned-server-exits)
+           (puthash key t dimfort--warned-server-exits)
+           ;; ``display-warning' rather than ``message' so the
+           ;; actionable notice doesn't get displaced from the
+           ;; minibuffer by eglot's own "Server died" message
+           ;; firing in the same tick.  ``*Warnings*' pops up on
+           ;; its own and stays open until dismissed.
+           (display-warning
+            'dimfort
+            (format
+             (concat "LSP failed to start (%s).  Common causes: "
+                     "missing 'lsp' extra (pipx install "
+                     "'dimfort[lsp]'), or a Python crash before "
+                     "the initialize handshake completes.  See "
+                     "`*EGLOT events*' for the underlying "
+                     "traceback.")
+             evt)
+            :warning))))
+     ;; Re-raise so eglot's own error path continues — we surface
+     ;; context, we don't suppress.
+     (signal (car err) (cdr err)))))
+
 
 (defun dimfort--eglot-execute-advice (orig server command arguments &rest rest)
   "Intercept DimFort commands on Emacs 29's `eglot-execute-command' path."
@@ -546,8 +692,27 @@ any action that has no command of ours) to eglot's default handling."
 (defun dimfort-setup ()
   "Register DimFort with whichever LSP front-end is loaded.
 
-Safe to call multiple times — both eglot and lsp-mode registrations
-de-duplicate by server-id / mode."
+Adds the Fortran modes to ``eglot-server-programs`` (or
+``lsp-language-id-configuration`` for lsp-mode), installs the
+post-attach side-panel auto-open hook, and wires the
+startup-failure / mid-session-exit notifications so a server
+crash surfaces as a ``*Warnings*` entry instead of vanishing
+silently.
+
+**Must be called for the LSP integration to work.** The
+two documented setup patterns both invoke it:
+
+  (require \\='dimfort)
+  (dimfort-setup)
+
+  ;; or via use-package:
+  (use-package dimfort
+    :hook ((f90-mode . dimfort-setup)
+           (fortran-mode . dimfort-setup)))
+
+Safe to call multiple times — both eglot and lsp-mode
+registrations de-duplicate by server-id / mode, and the advice
+installs guard via ``advice-member-p``."
   (interactive)
   (dimfort--eglot-setup)
   (dimfort--lsp-mode-setup))
@@ -587,6 +752,12 @@ leave the buffer with the pre-restart hint cache."
     (let ((server (and (fboundp 'eglot-current-server) (eglot-current-server))))
       (if server
           (progn
+            ;; audited(0.2.7): silent-OK — shutdown is a tear-down
+            ;; step in a multi-step restart sequence. If the server
+            ;; is already dead / unreachable, shutdown raising is
+            ;; expected; we want to forge ahead to `eglot-ensure'
+            ;; either way. The next attach attempt surfaces any
+            ;; real problem.
             (ignore-errors
               (eglot-shutdown server nil nil 'preserve-buffers))
             (eglot-ensure)
@@ -706,22 +877,37 @@ server-side; the server sends a heads-up toast in that case."
     (dimfort--ws-start-spinner)
     (dimfort--panel-repaint)
     (let ((server (eglot-current-server)))
-      (condition-case nil
+      ;; audited(0.2.7): error-surfacing — wire-level errors on
+      ;; the executeCommand request previously silently cleared
+      ;; the spinner with no user-visible signal. The server's
+      ;; documented refusals (started:false ack — already in
+      ;; progress, index not ready, no files) come back through
+      ;; `window/showMessage' which eglot routes to the
+      ;; *Messages* buffer, so we don't double-warn those. This
+      ;; branch only fires on the request CRASHING (transport
+      ;; error, server unreachable) — that case must surface.
+      (condition-case err
           (eglot-execute-command server "dimfort/checkWorkspace" [])
         (error
          (setq dimfort--ws-refreshing nil)
          (dimfort--ws-stop-spinner)
-         (dimfort--panel-repaint)))))
+         (dimfort--panel-repaint)
+         (message "DimFort: workspace check request failed — %s"
+                  (error-message-string err))))))
    ((and (featurep 'lsp-mode) (fboundp 'lsp--send-execute-command))
     (setq dimfort--ws-refreshing t)
     (dimfort--ws-start-spinner)
     (dimfort--panel-repaint)
-    (condition-case nil
+    ;; audited(0.2.7): error-surfacing — same shape as the eglot
+    ;; branch above. lsp-mode's variant of the same wire failure.
+    (condition-case err
         (lsp--send-execute-command "dimfort/checkWorkspace" [])
       (error
        (setq dimfort--ws-refreshing nil)
        (dimfort--ws-stop-spinner)
-       (dimfort--panel-repaint))))
+       (dimfort--panel-repaint)
+       (message "DimFort: workspace check request failed — %s"
+                (error-message-string err)))))
    (t (message "DimFort: no LSP client active for this buffer."))))
 
 ;; Per-feature toggles: flip the customizable variable, restart the
