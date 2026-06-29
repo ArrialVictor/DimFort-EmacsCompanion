@@ -33,6 +33,15 @@ jobs:
     # wildcard, not a matrix-name pattern.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the silent-failure gate's diff-aware
+          # check can resolve the merge base against origin/main.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
       # Install Emacs from the runner's Ubuntu apt repository
       # (currently emacs-nox 29.x on ubuntu-latest). Replaces the
@@ -84,3 +93,15 @@ jobs:
               (package-initialize))" \
             -l package-lint \
             --funcall package-lint-batch-and-exit dimfort.el
+
+      - name: Silent-failure regression gate
+        # Diff-aware: any new `(ignore-errors ...)` or `(condition-case
+        # nil ...)` introduced in this PR must carry an `audited(0.2.X)`
+        # annotation within ±5 lines. Pre-audit usages aren't flagged.
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: |
+          if [ -n "$BASE_REF" ]; then
+            git fetch --quiet origin "${{ github.base_ref }}"
+          fi
+          python scripts/silent-failure-gate.py
