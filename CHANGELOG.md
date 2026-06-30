@@ -76,6 +76,16 @@ defaults, packaging).
 
 ### Changed
 
+- **Cycle-command echo-arrow homogenized to `→`.** The three
+  restart-cycle commands (`dimfort-cycle-hover` /
+  `dimfort-cycle-scale` / `dimfort-cycle-cache`) — built from
+  the `dimfort--define-cycle` macro — previously echoed with
+  the ASCII `->` arrow (`DimFort: hover -> short`). The newer
+  0.2.6 cycles (`dimfort-cycle-sort-mode` /
+  `dimfort-cycle-unit-display`) settled on Unicode `→`
+  (`DimFort: sort mode → alphabetic`). The macro now uses `→`
+  so all five cycle commands echo with a consistent glyph.
+
 - **`MANUAL_QA.md` reorganised around display surfaces.** The walk
   now covers only what an LSP client can't reach: face rendering,
   fringe glyphs, eldoc / panel ASCII layout, mode-line progress,
