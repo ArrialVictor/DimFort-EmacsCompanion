@@ -39,8 +39,17 @@ The fastest sanity check that the file still compiles cleanly:
 emacs --batch -f batch-byte-compile dimfort.el
 ```
 
-Should exit 0 with no warnings. There are no unit tests yet; the source of
-truth for behavioural QA is `MANUAL_QA.md`.
+Should exit 0 with no warnings. There are no unit tests in this repo.
+Behavioural QA is split:
+
+- **Server-side wire behaviour** (diagnostic codes, hover / panel /
+  inlay / workspace / coverage / code-action / completion payloads)
+  is verified by the DimFort LSP integration test suite at
+  `tests/lsp_integration/` in the server repo. Changes that don't
+  affect rendering can rely on that suite alone.
+- **Display behaviour** (face rendering, fringe glyphs, eldoc / panel
+  layout, mode-line progress, echo-area messages, command UIs) is
+  covered by `MANUAL_QA.md`, run before each release.
 
 ## Style + scope
 

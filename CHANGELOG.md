@@ -74,6 +74,26 @@ defaults, packaging).
   Per-root deduped — same root never warns twice in one session.
   Only fires for `dimfort.toml` specifically.
 
+### Changed
+
+- **`MANUAL_QA.md` reorganised around display surfaces.** The walk
+  now covers only what an LSP client can't reach: face rendering,
+  fringe glyphs, eldoc / panel ASCII layout, mode-line progress,
+  echo-area messages, divider rendering, sort/display-mode visual
+  changes, command-rename verification, code-action snippet
+  placeholder behaviour. Server-side correctness (diagnostic codes,
+  hover / panel / inlay / workspace / coverage / code-action /
+  completion payloads) is now verified by the DimFort LSP integration
+  test suite that landed this cycle, so the manual walk no longer
+  re-checks them. Reorganised by display surface (Faces, Eldoc,
+  Side panel, Mode-line, etc.) rather than by feature, with the
+  fixtures kept up front and each step referencing them by name +
+  line. Net effect: roughly half the line count of the previous
+  walk, every step a pure display invariant. A closing pointer maps
+  the dropped checks back to the specific LSP test file that
+  covers them, so a regression triage finds the wire-test
+  counterpart fast.
+
 ## [0.2.6] — 2026-06-13
 
 ### Highlight
