@@ -483,7 +483,10 @@ qa.f90 sample completes too fast to read every phase).
       mode in **both** Scope and Imports together:
       - `input`: one column, annotation as written (`m/s`).
       - `canonical` (default): one column, base-SI form (`m·s⁻¹`).
-      - `both`: two columns, `input ⟶ canonical`.
+      - `both`: two columns side-by-side — `input` then `canonical`,
+        no arrow / separator glyph between (column spacing conveys
+        the relationship; matches the VSCode panel's `<td>`
+        convention).
 - [ ] **Unit-display persistence** — same `customize-variable` path
       for `dimfort-panel-unit-display-mode`.
 
