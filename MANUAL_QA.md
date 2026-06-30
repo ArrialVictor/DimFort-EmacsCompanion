@@ -1,20 +1,23 @@
-# Manual QA — DimFort Emacs companion
+# Manual QA — DimFort Emacs companion (display walk)
 
-A precise visual smoke test to run **before tagging a release**. It
-checks the parts only a human can see in the editor; the server's
-verdicts are unit-tested upstream, so this deliberately does *not*
-re-verify them. The Neovim and VSCode companions carry the same
-checklist with their own commands — running all three confirms the
-companions stay in parity.
+A short visual smoke walk run **before tagging a release**. It covers
+only what an LSP client test can't reach: **how Emacs renders** the
+server's payloads. Server-side correctness (diagnostic codes, hover /
+panel / inlay / workspace / coverage / code-action / completion
+payloads) is verified by the LSP integration suite at
+`DimFort/tests/lsp_integration/` — this walk does **not** re-check
+those.
 
-Every step lists the **exact** expected result. Anything that differs
-is a regression to file.
+Each step lists the **exact** visible result; anything that differs is
+a regression to file. The same fixtures are reused across surfaces, so
+save all six before starting.
 
-## Scene
+## Fixtures
 
-Save this as `qa.f90` and open it. It is self-contained (one module,
-no cross-file `use`) and fires exactly one of each interesting
-diagnostic.
+Save these into a fresh directory. The walks below reference them by
+name + line number.
+
+### `qa.f90` — main scene
 
 ```fortran
 module qa_mod
@@ -40,22 +43,17 @@ contains
     real :: recovered  !< @unit{Pa^2}
     real :: rho_brandes !< @unit{kg/m^3}
     real :: t_celsius                  ! no annotation -> U005
-    d         = c_sound * t            ! OK:   m = (m·s⁻¹)*s
-    bogus     = c_sound * t            ! H001: kg = m  (mismatch)
-    t_celsius = t - 273.15             ! H010: bare 273.15 literal
+    d         = c_sound * t            ! OK
+    bogus     = c_sound * t            ! H001
+    t_celsius = t - 273.15             ! H010
     combo     = c_sound**2 + d * d / (t * t) - c_sound * c_sound
-                                           !       (exercises +, -, *, /, **; all m²/s²)
-    ln_p      = log(ref_pressure)            ! intrinsic: LOG-wrap (Pa → LOG(Pa))
-    rt_e2     = sqrt(c_sound * c_sound)      ! intrinsic: sqrt halves (m²/s² → m/s)
-    abs_t     = abs(t)                       ! intrinsic: preserves (s → s)
+    ln_p      = log(ref_pressure)
+    rt_e2     = sqrt(c_sound * c_sound)
+    abs_t     = abs(t)
     recovered   = exp(log(ref_pressure) + log(ref_pressure))
-                                             ! LOG/EXP algebra: homomorphism + cancellation
-                                             !   exp(LOG(Pa) + LOG(Pa)) → exp(LOG(Pa²)) → Pa²
     rho_brandes = 1.e3 * 0.178 * (d * 2.0 * 1000.0)**(-0.922)   !< @unit_assume{kg/m^3 : empirical-fit Brandes2007}
-                                             ! Non-rational power on a length — not algebraically derivable;
-                                             ! @unit_assume asserts the result and fires U020 INFO.
     ref_pressure = dynamic_pressure(0.5 * c_sound)
-    call scale_pressure(2.0 * ref_pressure)        ! subroutine call
+    call scale_pressure(2.0 * ref_pressure)
   end subroutine checks
 
   subroutine scale_pressure(p)
@@ -65,386 +63,7 @@ contains
 end module qa_mod
 ```
 
-Start the server: `M-x eglot`. Give the first workspace check a moment
-to finish, then walk the sections below.
-
-## Defaults (fresh config)
-
-- [ ] No `[unit]` inlay ghost text anywhere — inlays are off by default.
-- [ ] The **side panel opens automatically** on the right once the server
-      attaches — it's on by default.
-- [ ] `M-x dimfort-status` prints **exactly** this:
-
-      ```
-      DimFort status
-        executable        : dimfort
-        inlay hints       : off
-        completion        : on
-        code actions      : on
-        go-to-definition  : on
-        hover             : short
-        cache             : read-write
-        scale checking    : auto
-        cache dir         : (default)
-        max workset size  : 40
-        external modules  : (none)
-      ```
-
-## Diagnostics
-
-In Emacs (flymake), an **error** renders the offending text in **bold
-red** with red `!!` in the left fringe; a **warning** renders in **bold
-orange** with a single orange `!`. On a fresh open, confirm exactly:
-
-- [ ] **Line 23** — `t_celsius` (no annotation) → **U005 warning**: the
-      name `t_celsius` in bold orange, orange `!` in the fringe.
-- [ ] **Line 25** — `bogus = c_sound * t` → **H001 error** `kg ≠ m`: the
-      whole assignment in bold red, red `!!` in the fringe.
-- [ ] **Line 26** — `t_celsius = t - 273.15` → **H010 warning** on the
-      `273.15` literal (suggests extracting it to a named PARAMETER).
-- [ ] Lines 24, 27, 29, 30, 31, 32, and 38 are **clean**; line 35 fires a **U020 INFO** acknowledging the `@unit_assume` (informational, not a problem) — no diagnostic (the assignments are
-      unit-consistent).
-
-**Interactive — U002 (unparseable annotation):** change line 14's
-`!< @unit{s}` to `!< @unit{??}` and save (`C-x C-s`). Confirm **two**
-diagnostics on line 14, then undo (`C-/`):
-
-- [ ] A **U002 error** underlining the `@unit{??}` token itself (not the
-      start of the line).
-- [ ] A **U005 warning** on `t` itself — because an unparseable annotation
-      makes `t` count as unannotated. (In the panel, `t` flips to 🔴.)
-
-## Hover
-
-Hover defaults to **`short`** (a compact unit surface beside the panel).
-`M-x dimfort-cycle-hover` cycles `disabled → short → detailed`, restarting the
-server each time. Point at the symbol; eldoc shows in the echo area (or open a
-window with `M-x eldoc-doc-buffer`).
-
-- [ ] **Short (default)** — on **`c_sound`** → single row
-      `c_sound : m·s⁻¹`. On the product `c_sound * t` (line 24) → the
-      tree shape used by every short hover:
-
-      ```
-      🟢 DimFort
-      c_sound * t  :  m       🟢
-      ├── c_sound  :  m·s⁻¹   🟢
-      └── t        :  s       🟢
-      ```
-
-- [ ] **Binary operators** — on **line 27** (the `combo = …`
-      assignment), hover each of `+`, `-`, `*`, `/`, `**` in turn. Each
-      renders the same tree shape (root sub-expression + immediate
-      operand rows); every row is 🟢; the topmost `**` shows
-      `c_sound**2 : m²·s⁻²` over its operand rows. One fixture
-      exercises every binary operator.
-
-- [ ] **Detailed** — cycle once more to `detailed`. For bare-identifier
-      operands like `c_sound * t` the layout is unchanged from short
-      (nothing to expand). For the **call** `dynamic_pressure`
-      (line 38), Detailed adds a sub-tree under the computed
-      argument row — the difference from Short:
-
-      ```
-      🟢 DimFort
-      dynamic_pressure(0.5 * c_sound) : kg·m⁻¹·s⁻²  🟢
-      └── 0.5 * c_sound               : m·s⁻¹       🟢
-          ├── 0.5                     : 1           🟢
-          └── c_sound                 : m·s⁻¹       🟢
-      ```
-
-      (Short shows root + the `0.5 * c_sound` argument row only, no
-      sub-tree.)
-
-- [ ] **Subroutine call** — still in `detailed`, hover the call name
-      `scale_pressure` (line 39). Same tree layout as a function call,
-      **but the root has no return unit** so it reads
-      `call scale_pressure(…) : -  🟢`. Argument row
-      `2.0 * ref_pressure : kg·m⁻¹·s⁻² 🟢` with the sub-tree beneath.
-
-- [ ] **Intrinsics — same tree as user calls.** Still in `detailed`:
-      - Point on `log` (line 29): root row `log(ref_pressure) :
-        LOG(Pa)` + child row `ref_pressure : Pa 🟢`. Intrinsic call
-        hovers now use the same tree renderer as user calls — no more
-        bare-identifier-fallback one-liner.
-      - Point on `sqrt` (line 30): root row `sqrt(c_sound * c_sound)
-        : m·s⁻¹` + computed-arg row (with operand sub-tree in
-        Detailed). Sqrt halves the unit (m²/s² → m/s).
-      - Point on `abs` (line 31): root row `abs(t) : s` + `t : s`
-        child row. Abs preserves the operand's unit.
-      Intrinsics have no `(expected …)` annotation on args — we don't
-      track formal-arg units for them — but the structural tree is
-      identical.
-
-- [ ] **LOG / EXP computational tricks** — the idiom physicists use
-      to do multiplicative work in log space:
-      `recovered = exp(log(p) + log(p))`. One line exercises BOTH
-      rules:
-      - **Homomorphism** (inside): `log(p) + log(p) → LOG(p²)`.
-      - **Cancellation** (outside): `exp(log(q)) → q`.
-
-      On **line 32**, point on the outermost `exp` (Detailed): root
-      row `exp(log(ref_pressure) + log(ref_pressure)) : Pa²  🟢`
-      over the child `log(ref_pressure) + log(ref_pressure) :
-      LOG(Pa²) 🟢`, and the sub-tree under that shows two
-      `log(ref_pressure) : LOG(Pa) 🟢` rows. DimFort follows the
-      algebra symbolically — no opacity, no approximation — so the
-      round-trip `exp ∘ (sum of logs)` recovers the product unit
-      cleanly. Strong showcase for atmospheric-science audiences.
-
-- [ ] **`@unit_assume` escape hatch** — empirical fits with
-      non-derivable units. On **line 35**, point on the assignment
-      (`rho_brandes = 1.e3 * 0.178 * (d * 2.0 * 1000.0)**(-0.922)`):
-      the line carries `!< @unit_assume{kg/m^3 : empirical-fit
-      Brandes2007}`. Because the RHS contains a length raised to a
-      non-rational power, the unit isn't derivable from first
-      principles — DimFort would normally emit `D1.4`. The
-      `@unit_assume` directive asserts the result's unit and
-      suppresses `D1.4`; in its place a **U020 INFO** appears,
-      acknowledging the assumption (informational, not a problem).
-      The hover reads:
-
-      ```
-      🟢 DimFort
-      rho_brandes = … : -                          🟢
-      ├── rho_brandes                : kg·m⁻³     🟢
-      └── 1.e3 * 0.178 * (d * 2.0 * 1000.0)**(-0.922)
-                                     : kg·m⁻³     🔵  (assumed: empirical-fit Brandes2007)
-          ├── …                        (RHS sub-tree with 🟡 leaves
-          └── …                         from the unresolved (-0.922))
-      ```
-
-      The 🔵 is a **per-row overlay** (NOT a severity tier — see
-      DimFort design/markers.md §4.6) painted on the RHS row, the
-      directive's syntactic subject. The RHS row's unit column shows
-      the **asserted** unit `kg·m⁻³`, not the computed `?`. The
-      assignment row stays **🟢** because the homogeneity check
-      passes (LHS `kg·m⁻³` matches the asserted RHS `kg·m⁻³`); the
-      hover header is `🟢 DimFort`. The 🔵 surfaces only in the
-      body, where the assertion lives. The RHS sub-tree still shows
-      its underlying algebra (with 🟡 on the `(-0.922)` unresolved
-      leaf) for transparency, but doesn't propagate up to the
-      assignment row.
-      Common in physics: Tetens (saturation vapour pressure),
-      Magnus, Buck, parameterised turbulence closures, etc.
-
-- [ ] **Assignment-mismatch `(expected …)` annotation.** On line 25
-      (`bogus = c_sound * t`), point on the `=`. The root row paints
-      🔴 from `H001` owning the assignment; the RHS child row reads
-      `c_sound * t : m  🟡  (expected kg)`. The 🟡 is the
-      🟡-on-`expected` override — the RHS expression resolved cleanly
-      to `m`, but its consumer (the LHS) demanded `kg`.
-
-- [ ] **Pure-signature hover** (point on a function/subroutine
-      *definition* header — no call site). Point on `dynamic_pressure`
-      in **line 5** (the function definition itself). The hover
-      collapses to a single line:
-
-      ```
-      🟢 DimFort
-
-      dynamic_pressure(m·s⁻¹) : kg·m⁻¹·s⁻²
-      ```
-
-      Just the dimensional signature. No per-arg row table — the
-      header alone carries the formal interface. Unannotated formal
-      slots and unannotated returns render as `?` and flip the
-      header marker to 🟡.
-
-- [ ] Cycle once more → back to `disabled`; hovers go silent again.
-
-## Inlay hints
-
-- [ ] `M-x dimfort-toggle-inlay-hints` → `[m·s⁻¹]`-style ghost text appears
-      after variable uses. Run it again → the ghost text disappears.
-
-## Code actions
-
-`M-x eglot-code-actions` with point on the relevant line.
-
-- [ ] On `t_celsius` (line 23) → **"add `@unit{}`"**. Applying inserts
-      `!< @unit{}` and leaves point **between the braces**.
-- [ ] On the `273.15` (line 26) → **"extract literal to PARAMETER"**.
-      Applying prompts for a name, then inserts a typed `real, parameter`
-      declaration and replaces the `273.15` with the new name.
-
-## Navigation & completion
-
-- [ ] `M-.` (`xref-find-definitions`) on a `c_sound` use → jumps to its
-      declaration on line 2.
-- [ ] Type a new `!< @unit{` and invoke completion (`C-M-i`) → unit names
-      are offered. **Tip — if your terminal sends a literal `9;6u`** when
-      you press `C-M-i` (the CSI u keyboard protocol that terminal Emacs
-      doesn't decode), use **`ESC TAB`** instead — the universal substitute
-      for `C-M-i` (`ESC` is Meta, `TAB` is `C-i`). GUI Emacs avoids the
-      whole issue.
-
-## Side panel
-
-`M-x dimfort-toggle-panel` opens it on the right. The panel follows the
-cursor (≈0.2 s debounce) and dims briefly while it refreshes.
-
-- [ ] **Assignment with a mismatch** — put point on the **`=`** in line 25
-      (`bogus = c_sound * t`). The whole assignment renders, marked 🔴
-      because `kg ≠ m`:
-
-      ```
-      Expression
-
-      bogus = c_sound * t : -      🔴
-      ├── bogus           : kg     🟢
-      └── c_sound * t     : m      🟡  (expected kg)
-          ├── c_sound     : m·s⁻¹  🟢
-          └── t           : s      🟢
-      ```
-
-      The root row reads `: -` (structural-no-unit — an assignment has
-      no own unit) and 🔴 because H001 owns it. The RHS row demotes
-      🟢 → 🟡 with `(expected kg)` appended: the expression
-      `c_sound * t` resolved cleanly to `m`, but its consumer (the LHS)
-      demanded `kg`. (Rule IDs like `(R4.2)` are no longer rendered on
-      tree rows.)
-
-- [ ] **Multiplication chain** — point on the **`=`** in line 10
-      (`q = 0.5 * rho * v * v`). The product nests, every step 🟢, the
-      root resolving to `kg·m⁻¹·s⁻²`:
-
-      ```
-      q = 0.5 * rho * v * v : -            🟢
-      ├── q                 : kg·m⁻¹·s⁻²  🟢
-      └── 0.5 * rho * v * v : kg·m⁻¹·s⁻²  🟢
-          ├── 0.5 * rho * v : kg·m⁻²·s⁻¹  🟢
-          │   ├── 0.5 * rho : kg·m⁻³      🟢
-          │   │   ├── 0.5   : 1           🟢
-          │   │   └── rho   : kg·m⁻³      🟢
-          │   └── v         : m·s⁻¹       🟢
-          └── v             : m·s⁻¹       🟢
-      ```
-
-- [ ] **Function call with arguments** — point on the call name
-      `dynamic_pressure` in line 38. The call resolves to its result unit,
-      and the computed argument breaks down beneath it:
-
-      ```
-      dynamic_pressure(0.5 * c_sound) : kg·m⁻¹·s⁻²  🟢
-      └── 0.5 * c_sound               : m·s⁻¹       🟢
-          ├── 0.5                     : 1           🟢
-          └── c_sound                 : m·s⁻¹       🟢
-      ```
-
-- [ ] **Subroutine call** — point on the call name `scale_pressure` in
-      line 39. A subroutine has no return unit, so the root shows `-`
-      in the unit column and 🟢 (no diagnostic owns it). The computed
-      argument still expands beneath it:
-
-      ```
-      call scale_pressure(2.0 * ref_pressure) : -           🟢
-      └── 2.0 * ref_pressure                  : kg·m⁻¹·s⁻²  🟢
-          ├── 2.0                             : 1           🟢
-          └── ref_pressure                    : kg·m⁻¹·s⁻²  🟢
-      ```
-
-- [ ] **Call-arg expected on mismatch** — temporarily edit line 38 to
-      `ref_pressure = dynamic_pressure(c_sound * t)`. The Expression
-      tree's argument row now shows
-      `c_sound * t : m 🟡 (expected m·s⁻¹)` — the 🟡 is the
-      expected-override (the expression resolved cleanly, but the call
-      disagrees with the formal); the 🔴 sits on the enclosing call
-      via H004. Revert the edit when done.
-
-- [ ] **Stacked scopes** — with point in line 10 (inside the function),
-      the Scope section stacks the module over the function, indented by
-      nesting (no column header — the row is `line · name · unit · mark`):
-
-      ```
-      Module: qa_mod
-
-        2     c_sound                              m·s⁻¹       🟢
-        3     ref_pressure                         Pa          🟢
-        5     dynamic_pressure(m·s⁻¹)              kg·m⁻¹·s⁻²  🟢
-       24     scale_pressure(kg·m⁻¹·s⁻²)           -           🟢
-
-        Function: dynamic_pressure
-
-          6     v    m·s⁻¹  🟢
-          7     q    Pa     🟢
-          8     rho  kg/m^3 🟢
-      ```
-
-      The two procedure rows under `Module: qa_mod` are the module's own
-      defined functions/subroutines — visible from anywhere within the
-      module (Fortran host association), mirroring how imported
-      procedures show in the Imports section. Subroutines render `-` in
-      the unit column (no return *by design*).
-
-- [ ] **Markers** — in `checks` (e.g. point in line 25), `t_celsius` shows
-      🟡 (unannotated). With a `@unit{??}` somewhere in scope, that
-      variable shows 🔴 (annotated but unparseable).
-
-- [ ] **Cursor-follow** — move point between line 10 (function) and line 25
-      (subroutine); the Scope section switches between `Function:
-      dynamic_pressure` and `Subroutine: checks` accordingly.
-
-### Panel — Diagnostics / Interactions / Actions
-
-These three sections sit inside the Cursor block (alongside
-Expression) and are toggled together via `M-x dimfort-toggle-cursor`
-(0.2.6) — see the per-section visibility entries in the 0.2.6
-section below. They sit between Expression and Scope in the default
-layout (all three sections visible). Each is always present, showing
-`(none)` when nothing applies, so they don't pop in and out as point
-moves.
-
-- [ ] **Diagnostics** — point on line 25 (`bogus = c_sound * t`); the
-      Diagnostics section shows **🔴 H001: …**. On line 23 (`t_celsius`) it
-      shows **🟡 U005: …**. On a clean line (18) it shows `(none)`. `RET`
-      on a diagnostic row jumps to that span.
-- [ ] **Interactions** — point on a `c_sound` use (line 24). The
-      Interactions section shows the symbol `c_sound`, then the
-      **Declaration** group (line 2) and **Read** group (its use sites),
-      each row `file:line   unit` with the snippet beneath. `RET` on a site
-      jumps there (cross-file when the site is elsewhere). Because
-      `c_sound` is read as `m·s⁻¹` at lines 18/21 but `kg/s` at line 25, a
-      **🔴 X001** conflict row sits at the top.
-- [ ] **Actions** — point on `t_celsius` (line 23) → the Actions section
-      lists **• Add @unit{} to t_celsius**; `RET` on it inserts `!< @unit{}`
-      with point between the braces. Point anywhere on line 26 (the H010
-      line) → **• Extract literal '273.15' into a named PARAMETER (s)**;
-      `RET` prompts for a name and applies the refactor.
-- [ ] **Footer (coverage bar)** — the panel's last line reads
-      `File: <pct>% (🟡 N 🔴 M)   Project: …` with the active file's
-      coverage on the left and the whole-workspace aggregate on
-      the right.
-- [ ] **WS pre-refresh state** — before the first manual
-      workspace check, the Project segment reads `Project: –` (dimmed).
-- [ ] **Workspace check** — run `M-x dimfort-check-workspace`.
-      The Project segment becomes a Braille spinner
-      (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`) for the duration of the server-side
-      check, then settles to `Project: <pct>% (🟡 N 🔴 M)` when the
-      `dimfort/workspaceCheckCompleted` notification arrives.
-- [ ] **WS stale state** — after a successful check, edit any
-      Fortran buffer. The Project segment dims (the snapshot may no
-      longer reflect current state). The File segment updates
-      live.
-- [ ] **Duplicate trigger** — run `M-x dimfort-check-workspace`
-      twice in quick succession. The second invocation prints
-      "DimFort: workspace check already in progress" to the echo
-      area instead of spawning a second worker.
-- [ ] **Restart clears state** — `M-x dimfort-restart` resets
-      the bar back to `File: –   Project: –` (dimmed) and clears the
-      file-coverage cache; the next workspace check re-populates.
-
-### Panel — Scope filter
-
-- [ ] `M-x dimfort-scope-filter RET Pa RET` → the Scope section keeps only
-      variables whose name or unit matches `Pa` (e.g. `ref_pressure`, `q`),
-      with a `Filter: "Pa"` header; scopes with no surviving variables are
-      hidden. `M-x dimfort-scope-filter RET RET` (empty) clears it.
-
-## Scale checking (S001 / S002)
-
-Save this `scale_qa.f90` and open it (no `dimfort.toml` needed — the
-editor toggle drives it):
+### `scale_qa.f90` — scale-mode display
 
 ```fortran
 module scale_qa
@@ -455,104 +74,39 @@ module scale_qa
   real :: t_c    !< @unit{degC}
 contains
   subroutine s()
-    phpa = play                  ! S001: hPa vs Pa (×100 multiplicative scale)
-    phpa = play / PA_PER_HPA     ! clean: the typed factor cancels the mismatch
-    t_k  = t_c                   ! S002: K vs degC (affine offset)
+    phpa = play
+    phpa = play / PA_PER_HPA
+    t_k  = t_c
   end subroutine s
 end module scale_qa
 ```
 
-- [ ] **Auto (default)** — with `dimfort-scale-mode` = `"auto"` and no
-      `dimfort.toml`, the file is **clean** (no S001/S002).
-- [ ] **On** — `M-x dimfort-cycle-scale` until the echo area says
-      `scale checking -> on` (the server restarts): `phpa = play` →
-      **S001** and `t_k = t_c` → **S002** (yellow), the panel circles 🟡.
-- [ ] **Scale factor surfaces uniformly in scale mode** — with scale on,
-      point on the `=` of `phpa = play` (or look at the Panel's
-      Expression section). The LHS row reads `phpa : 100×kg·m⁻¹·s⁻²` 🟢
-      and the RHS row reads `play : kg·m⁻¹·s⁻²` 🟢 — the ×100 ratio
-      matches the diagnostic's `×100`. The same factor appears wherever
-      a unit is rendered (scope/imports normalized columns, etc.). With
-      scale off, factors are hidden everywhere — both sides of the
-      assignment render to the bare `kg·m⁻¹·s⁻²`. Single rule: displays
-      match what the checker is reasoning about.
-- [ ] **Typed conversion silences it** — the second assignment in `s()`,
-      `phpa = play / PA_PER_HPA`, is **clean** (no S001). The typed
-      `Pa/hPa` parameter carries the multiplicative factor explicitly,
-      so the assignment's units balance and the scale check passes.
-- [ ] **Off / Auto** — cycle again to `off` (forced clean even if a toml
-      enabled it), once more to `auto` (back to deferring to the toml).
-
-## Unparsed regions (P001)
-
-`P001` marks lines tree-sitter couldn't parse — DimFort makes no unit
-guarantee there. It's an **info** diagnostic, so it renders as a faint
-**blue** squiggle, distinct from real (red) violations.
-
-Save this `unparsed_qa.f90` and open it:
+### `unparsed_qa.f90` — P001 squiggle face
 
 ```fortran
 subroutine unparsed_qa(press, vel)
   implicit none
   real, intent(in)  :: press   !< @unit{Pa}
   real, intent(out) :: vel     !< @unit{m/s}
-  vel = press        ! H001 (red): m·s⁻¹ vs Pa
-  vel = * / +        ! P001 (blue): unparseable line
-  vel = 0.0          ! swallowed by line-6 error region — blue too
-  vel = vel * 2.0    ! CLEAN — proves the blue stops here
+  vel = press
+  vel = * / +
+  vel = 0.0
+  vel = vel * 2.0
 end subroutine unparsed_qa
 ```
 
-> Why two trailing statements: `vel = 0.0` gets swallowed by tree-sitter's
-> error recovery on line 6 (its assignment_statement is consumed into the
-> ERROR region, so the Expression panel is degraded there). `vel = vel * 2.0`
-> is the first fully-clean statement after the bad line — present to
-> demonstrate that the P001 squiggle *stops* at line 7 and does NOT bleed
-> further. A trailing valid statement is also required for tree-sitter to
-> find the subroutine boundary; without one, the **whole** routine wraps in
-> an error region and the Scope panel blanks (known panel-robustness gap).
-
-- [ ] **Blue squiggle** — `vel = * / +` gets a **blue (info)** underline;
-      point on it (and `M-x dimfort-show-diagnostic`) shows
-      **`P001` … "could not parse this region — DimFort makes no unit
-      guarantee here"** at *Information* severity. With point on that
-      line, the panel's **Diagnostics** section lists the P001 with a
-      **🔵** glyph (matching 🔴 error / 🟡 warning).
-- [ ] **Distinct from a real error** — `vel = press` carries a **red**
-      `H001` on the line above, so blue (FYI) and red (violation) are
-      visibly different.
-- [ ] **Localized, not the whole routine** — the blue squiggle covers
-      **exactly two lines**: `vel = * / +` (the bad line) and the
-      immediately-following `vel = 0.0` (whose assignment_statement
-      tree-sitter swallows into the error recovery region). The next
-      line `vel = vel * 2.0` is **not blue** — proving the squiggle stops
-      at the right boundary. The Expression panel is correctly empty on
-      lines 6-7 (no trustworthy tree there) and populates normally on
-      line 8 (clean autocast → `m·s⁻¹`).
-- [ ] **Doesn't mask real checks** — the `H001` still fires; P001 only marks
-      what it *couldn't* read, it doesn't suppress checking elsewhere.
-- [ ] **Suppressible** — add a workspace `dimfort.toml` with
-      `[diagnostics]` `P001 = "off"`, save; the blue squiggle disappears
-      (no manual restart), the red `H001` stays.
-
-## Imports section
-
-Save this `imports_qa.f90` and open it (one file, two modules — the
-second `use`s the first):
+### `imports_qa.f90` — imports panel + cross-file navigation
 
 ```fortran
-! `phys_base` exists to test TRANSITIVE re-export: phys_constants
-! `use`s it, and `solver` uses phys_constants — see whether `g0`
-! surfaces in solver's Imports section.
 module phys_base
   real :: g0   !< @unit{m/s^2}
 end module phys_base
 
 module phys_constants
-  use phys_base                          ! transitive: re-exports g0 by default
+  use phys_base
   real :: play     !< @unit{Pa}
   real :: grav     !< @unit{m/s^2}
-  real :: density                        ! NO annotation → unannotated 🟡
+  real :: density
 contains
   function gravity_at(h) result(g)
     real, intent(in) :: h   !< @unit{m}
@@ -576,332 +130,22 @@ contains
 end module solver
 ```
 
-- [ ] **Lists vars + procedures + subroutines + unannotated** — point
-      on `local_p = play` (inside `step`): the **Imports** section
-      shows a `from phys_constants` header with four indented rows:
-      - `play         kg·m⁻¹·s⁻²  🟢` (annotated variable)
-      - `gravity_at(m)  m·s⁻²     🟢` (callable, arg unit in parens,
-        return unit in the column)
-      - `set_play(Pa)  -          🟢` (subroutine — structural-no-unit
-        glyph, dimmed; distinct from `(none)`)
-      - `density       ?          🟡` (unannotated variable — the `?`
-        glyph appears dimmed, distinguishing it from a real unit)
-- [ ] **Cross-file navigation** — `RET` on `play` jumps to its
-      declaration; `RET` on `gravity_at(m)` jumps to the function;
-      `RET` on `set_play(Pa)` jumps to the subroutine. Same file
-      here; another file in a real project.
-- [ ] **Scoped + shadowed** — `grav` is **not** listed (the `only:`
-      list excludes it). Add `real :: play !< @unit{Pa}` as a local
-      in `step` and `play` drops from Imports (the local shadows it;
-      it shows under Scope instead).
-- [ ] **Transitive imports** — drop the `, only: …` filter on `solver`'s
-      `use phys_constants` line so it becomes plain `use phys_constants`.
-      `phys_constants` itself `use`s `phys_base`, which declares `g0`.
-      Default Fortran semantics re-export `g0` through `phys_constants`.
-      Point inside `step`: a **second** group header appears, `from
-      phys_base` (tagged `via phys_constants`), with a single row:
-      - `g0` → `m·s⁻²` 🟢 — `RET` on it **jumps cross-file** to
-        `phys_base`'s declaration site (`imports_qa.f90:2`).
-      The existing `from phys_constants` group still lists `play`,
-      `grav`, `density`, `gravity_at`, `set_play` — transitive
-      re-export only adds the `phys_base` group, never removes a row.
-- [ ] **Imports filter** — `M-x dimfort-imports-filter RET gravity RET`
-      narrows the Imports section to `gravity_at(m)`; `play` narrows
-      to `play` + `set_play(Pa)`; empty clears it. Independent of
-      `dimfort-scope-filter` (Scope).
-- [ ] **Empty case** — point in `phys_base` (which imports nothing):
-      the Imports section shows `(none)`.
-
-## Panel sort, unit display, coverage report, `[N/5]` (0.2.6)
-
-The Emacs companion keeps the single unified `*dimfort*` panel buffer
-(no per-section windows), but gains shared sort + unit-display modes
-across the Scope and Imports sections, an explicit visual divider
-between them, and an async-aware `M-x dimfort-coverage-report` buffer.
-Surfaces here mirror the VSCompanion `panel.sortMode` /
-`panel.unitDisplayMode` settings and the status-bar coverage tooltip.
-
-With `qa.f90` open and the panel visible (`M-x dimfort-toggle-panel`):
-
-### Divider between Scope and Imports
-
-- [ ] **Horizontal rule visible** — a row of `─` characters spans the
-      panel width between the Scope section's last row and the
-      `Imports` header. Matches the divider already drawn between
-      Actions and Scope, and between Imports and the footer.
-
-### Panel sort cycle (`M-x dimfort-cycle-sort-mode`)
-
-- [ ] **Shared mode** — the command cycles
-      `dimfort-panel-sort-mode` through `line → alphabetic → status`;
-      the echo area reports the new mode (e.g. `DimFort: sort mode →
-      alphabetic`).
-
-- [ ] **Synchronous re-render** — invoking the command re-sorts the
-      Scope **and** Imports rows in the same repaint (no LSP
-      round-trip — panel repaints from cached payload). Cycle once
-      and verify Imports rows reorder alongside Scope rows.
-
-- [ ] **Persistence across sessions** — pick a non-default mode (e.g.
-      `alphabetic`) via `M-x customize-variable RET
-      dimfort-panel-sort-mode`; save for future sessions. Restart
-      Emacs and reopen the file — both sections come back in
-      alphabetic order.
-
-### Panel unit-display cycle (`M-x dimfort-cycle-unit-display`)
-
-- [ ] **Shared mode** — the command cycles
-      `dimfort-panel-unit-display-mode` through
-      `input → canonical → both`; echo area reports the new mode.
-
-- [ ] **Column layout changes per mode** — applies to both Scope and
-      Imports in the same repaint:
-      - **input**: one unit column showing the annotation as written
-        (e.g. `m/s` instead of `m·s⁻¹`). Thinnest layout.
-      - **canonical** (default): one unit column showing the base-SI
-        normalised form (`m·s⁻¹`).
-      - **both**: two unit columns side-by-side
-        (`input ⟶ canonical`). Widest layout.
-
-- [ ] **Persistence across sessions** — same `customize-variable`
-      path as sort; choice survives Emacs restart.
-
-### `M-x dimfort-coverage-report` async re-render (PR #20)
-
-- [ ] **Cold open populates** — visit `qa.f90` from a fresh session,
-      then run `M-x dimfort-coverage-report` **immediately** (do not
-      edit, do not wait). A `*DimFort Coverage*` buffer opens at the
-      bottom (height ~14) with a File / Project table. The **File**
-      column populates within ~1–2 s of opening as the LSP
-      `dimfort/coverageStats` response lands — no race, no flicker,
-      no need to re-invoke the command.
-
-- [ ] **Project column dim until refreshed** — until you run `M-x
-      dimfort-check-workspace`, the Project column shows `–` glyphs
-      and the footer reads `Project coverage not yet computed.` /
-      `Run M-x dimfort-check-workspace to compute.`. After the
-      workspace check completes, the Project column populates
-      asynchronously (driven by the
-      `dimfort/workspaceCheckCompleted` notification, not by the
-      command's return value).
-
-- [ ] **Stale marker on edits** — after a workspace check, edit any
-      buffer. The Project column header switches to `Project
-      (stale)` and the footer text invites re-running the workspace
-      command. Re-run to refresh.
-
-- [ ] **`q` closes** — pressing `q` in the report buffer buries the
-      window via `quit-window`.
-
-### Source-buffer footer fix (PR #20)
-
-- [ ] **Footer tracks the explicit source buffer** — open `qa.f90`,
-      let the panel populate, then `C-x b` to the `*dimfort*` panel
-      buffer itself. The panel footer's `File:` cell continues to
-      reflect `qa.f90`'s stats (and does **not** flicker to `–` or
-      try to recompute against the panel buffer's own URI). Same
-      check while the `*DimFort Coverage*` buffer is current: the
-      footer remains stable. The fix reads from the
-      `dimfort--panel-source-buffer` variable rather than
-      `(current-buffer)`, so stats notifications that arrive in a
-      non-source-buffer context (panel buffer, coverage-report
-      buffer, workspace-check-completed callback) no longer corrupt
-      the footer.
-
-### Prime stats on attach (PR #20)
-
-- [ ] **Cold-open footer populates without edits** — kill all Emacs
-      buffers, then revisit `qa.f90` from disk. Within ~1.5 s of the
-      LSP attaching (`eglot-managed-mode-hook` /
-      `lsp-managed-mode-hook`), the panel footer's `File:` cell
-      populates with verified / unverified / violation counts. No
-      manual edit (which was previously the only trigger via
-      `after-change-functions`) is required.
-
-### `[N/5]` workspace-check phase counter (DimFort PR #81)
-
-Best verified on a real-world ~2400-file workspace (the small `qa.f90`
-sample completes too fast to read every phase). Emacs eglot renders
-the `message` field of a `workDoneProgress` notification in the
-mode-line by default, so the counter should appear without extra
-configuration.
-
-- [ ] **Five phases observed** — open a large real-world Fortran
-      codebase, run `M-x dimfort-check-workspace`, and watch the
-      mode-line progress region. The message cycles through the
-      following phases (numbers fixed, file count varies):
-      - `[1/5] loading…`
-      - `[2/5] indexing modules…`
-      - `[3/5] checking…`
-      - `[4/5] published N/N`
-      - `[5/5] projecting coverage…`
-
-- [ ] **`[5/5]` stays visible through projection window** — after the
-      diagnostics-publish wave finishes, the mode-line continues to
-      show `[5/5] projecting coverage…` for the ~5 s post-publish
-      projection window. The progress region only clears when the
-      `dimfort/workspaceCheckCompleted` notification arrives and the
-      panel footer's Project column populates.
-
-### Per-section visibility (`dimfort-show-*`)
-
-Replaces the previous tristate `dimfort-panel-layout` defcustom
-(`both` / `expression` / `routine`). Each section is now toggled
-independently via its own `defcustom` boolean; defaults to all three
-visible.
-
-- [ ] **`M-x dimfort-toggle-cursor`** hides the Expression /
-      Diagnostics / Interactions / Actions block. Echo area reads
-      `DimFort: Cursor section hidden`. Run again to show it. Scope
-      and Imports remain unaffected. Persists across sessions when
-      the user runs `M-x customize-save-customized` (or
-      `customize-save-variable` on the `dimfort-show-cursor`
-      defcustom).
-
-- [ ] **`M-x dimfort-toggle-scope`** hides the Scope section only.
-
-- [ ] **`M-x dimfort-toggle-imports`** hides the Imports section only.
-
-- [ ] **Dividers adapt** — toggle Cursor off; the `─────` divider
-      between Cursor and Scope is gone (no stranded separator).
-      Toggle Scope off too; the divider between Scope and Imports
-      also disappears. Visible dividers always sit between two
-      visible neighbours.
-
-- [ ] **Footer always visible** — toggle ALL three sections off. The
-      panel buffer now shows only the footer (`File: …  Project:
-      …`). The footer is universal — it doesn't track section
-      visibility.
-
-### Cache cycle + clear (`M-x dimfort-cycle-cache` / `dimfort-clear-cache`)
-
-- [ ] **`M-x dimfort-cycle-cache`** cycles `dimfort-cache-mode`
-      through `off → read-only → read-write → off`. Echo area
-      reports each tick (`DimFort: cache → read-only`, etc.). The
-      server restarts on each tick (cache mode is a wire-level
-      setting). Previously (0.2.5) this command (then named
-      `dimfort-toggle-cache`) was a 2-state toggle skipping
-      `read-only`; 0.2.6 brings parity with the `dimfort-cache-mode`
-      defcustom's full range.
-
-- [ ] **`M-x dimfort-clear-cache`** deletes the `.dimfort-cache/`
-      directory under the workspace root and restarts the server.
-      Echo area reads `DimFort: cache cleared (…)`. When the cache
-      directory doesn't exist, echo area reads `DimFort: cache
-      directory does not exist (already clean).`. Mirrors
-      VSCompanion's `dimfort.clearCache` and Nvim's
-      `:DimFortClearCache`.
-
-### `M-x dimfort-open-config` (0.2.6)
-
-These checks need a **fresh project folder** with no
-`dimfort.toml` and no `units.toml`. `M-x cd` into an empty
-directory (and ensure the buffer's `default-directory` reflects
-it) before each subsection.
-
-- [ ] **`dimfort.toml` empty cold-create** — run `M-x
-      dimfort-open-config`, pick `Project configuration file
-      (dimfort.toml)`. A `completing-read` shows `Empty
-      template` and `Reference template (all sections commented out)`. Pick
-      `Empty file`. A new `dimfort.toml` appears at the
-      project root, opens in a buffer, and contains just the
-      minimal header. Echo area reads `DimFort: created
-      <path>/dimfort.toml`.
-
-- [ ] **`dimfort.toml` all-sections cold-create** — same as
-      above but pick `Reference template (all sections commented out)`. The
-      file's `[units]` / `[parser]` / `[diagnostics]` /
-      `[scale]` / `[project]` section headers are all
-      present but each line is prefixed with `# `.
-
-- [ ] **`dimfort.toml` warm-open** — run again, pick
-      `Project configuration file (dimfort.toml)`. Opens the
-      existing file with no sub-pick and no modification. No
-      "created" echo.
-
-- [ ] **Units file empty cold-create** — run `M-x
-      dimfort-open-config`, pick `Project units file
-      (units.toml)`. A `completing-read` shows `Empty
-      template` and `Defaults as reference (all commented
-      out)`. Pick
-      `Empty file`. A new `units.toml` appears, opens,
-      and contains the empty-template stub. A new
-      `dimfort.toml` appears alongside with
-      `[units]\nfile = "units.toml"`. Echo area: `DimFort:
-      created units.toml + wired into dimfort.toml`.
-
-- [ ] **Units file defaults cold-create** — same as above
-      but pick `Reference template (bundled defaults, all commented out)`.
-      The file's `[base]` / `[prefixes]` / `[derived]`
-      sections are all present but each line is prefixed
-      with `# `.
-
-- [ ] **Auto-wire appends `[units]` to existing
-      `dimfort.toml`** — pre-create a `dimfort.toml`
-      containing only `[diagnostics]\nH001 = "off"\n` (no
-      `[units]`). Run `M-x dimfort-open-config`, pick
-      `Project units file (units.toml)`. After creation, the
-      existing
-      `dimfort.toml` is appended with
-      `[units]\nfile = "units.toml"`. Original sections
-      preserved.
-
-- [ ] **Edge case: existing `[units]` section** —
-      pre-create a `dimfort.toml` containing
-      `[units]\nother_key = "value"\n`. Run + pick units
-      file. After creation, echo area shows: `DimFort:
-      created units.toml. Your dimfort.toml already has a
-      [units] section — add 'file = "units.toml"' under it
-      to enable the new file.`. The `dimfort.toml` is
-      **not** modified.
-
-### Command rename: `dimfort-toggle-panel` (0.2.6)
-
-- [ ] **Renamed from `dimfort-panel-toggle`** for cross-companion
-      consistency (VSCompanion's `dimfort.togglePanel`, Nvim's
-      `:DimFortTogglePanel`). `M-x dimfort-toggle-panel` opens /
-      closes the side panel. The old name is **gone** (beta-period
-      rename per release-cycle convention); user-side `init.el`
-      bindings need updating.
-
-## Configurable comment delimiters (0.2.2)
-
-Save this `delim_qa.f90` in a fresh folder alongside the toml
-just below it:
+### `delim_qa.f90` + companion `dimfort.toml` — delimiter face rendering
 
 ```fortran
 subroutine delim_demo
   implicit none
-
-  ! §10 — bare ! @unit{} is now eligible at a decl. Hover → m/s.
   real :: ws   ! @unit{m/s}
-
-  ! §2 — bracket pattern (configured below). Hover → Pa.
   real :: pa   ! atmospheric pressure [Pa] at the surface
-
-  ! §3.2 — standalone above a decl, plain `!`. Hover → kg.
   ! mass loading [kg]
   real :: kg
-
-  ! §6 — any pattern on a multi-var attaches to all names.
   real :: a, b, c   ! [m]
-
-  ! §8.2 — two patterns disagree → U021. First-listed (`@unit{}`)
-  ! wins, so hover `g` → kg.
   real :: g   !< wind speed [m/s] @unit{kg}
-
-  ! §8.3 — @unit_assume on a declaration → U023.
   real :: t   !< @unit_assume{K: legacy fit}
-
-  ! §8.3 — @unit{} on an assignment → U023.
   ws = 1.0   !< @unit{m/s}
-
-  ! §12 — unparseable unit → U002 with suggested rewrite.
   real :: diff   !< @unit{m2/s}
 end subroutine
 ```
-
-Save this `dimfort.toml` next to it:
 
 ```toml
 [parser]
@@ -911,42 +155,11 @@ unit_comment_delimiters = [
 ]
 ```
 
-- [ ] **Bracket pattern recognised** — `eldoc` / `eglot` hover
-      on `pa`, `a`/`b`/`c`, or `kg` (above) shows the
-      bracket-captured unit.
-- [ ] **Plain `!` eligibility (§10)** — `ws` on line 4 has the
-      `! @unit{m/s}` form (no Doxygen marker). Hover shows `m/s`.
-- [ ] **U021 fires** — line with `[m/s] @unit{kg}` shows a
-      `flymake` warning indicator; the message names both
-      captures; hover `g` shows `kg` (the first-listed pattern's
-      capture).
-- [ ] **U023 fires** — `@unit_assume{K: legacy fit}` on the
-      `real :: t` decl shows a warning; message says "did you
-      mean @unit?". Same for `@unit{m/s}` on `ws = 1.0` — the
-      message suggests `@unit_assume` or
-      `@unit_affine_conversion`.
-- [ ] **U002 quick-fix** — `@unit{m2/s}` shows a `flymake` error
-      indicator; message includes "did you mean 'm^2/s'?".
-      `M-x eglot-code-actions` offers **DimFort: Replace with
-      'm^2/s'** as the preferred fix; accepting it edits
-      `m2/s` → `m^2/s` and clears the diagnostic.
-- [ ] **Pattern config invalidates cache** — comment out
-      `{ open = "@unit{", close = "}" }` in the toml, save, then
-      `M-x dimfort-restart`. The `@unit{m/s}` hover on `ws`
-      should now show no unit (the canonical form is no longer
-      configured in this project). Uncomment to restore.
-
-## Polymorphism (0.2.3)
-
-Save this as `poly_qa.f90` in a fresh folder (no `dimfort.toml`
-needed — defaults are fine). The scene covers four cases: clean
-polymorphic body, dishonest body, caller mismatch, clean caller.
+### `poly_qa.f90` — polymorphic `'a` face
 
 ```fortran
 module poly_qa
 contains
-
-  ! Case A — cleanly polymorphic body. No fires expected.
   subroutine avg_two(x, y, mean)
     real, intent(in)  :: x     !< @unit{'a}
     real, intent(in)  :: y     !< @unit{'a}
@@ -956,289 +169,450 @@ contains
     mean = half * (x + y)
   end subroutine avg_two
 
-  ! Case B — dishonest body: signature claims 'a but body adds {kg}.
-  subroutine biased_avg(x, y, mean)
-    real, intent(in)  :: x        !< @unit{'a}
-    real, intent(in)  :: y        !< @unit{'a}
-    real, intent(out) :: mean     !< @unit{'a}
-    real, parameter   :: bias_kg = 1.0  !< @unit{kg}
-    real :: half  !< @unit{1}
-    half = 0.5
-    mean = half * (x + y) + bias_kg
-  end subroutine biased_avg
-
-  ! Case C — caller passes kg into one 'a slot and m into another.
-  subroutine caller_mismatch(m_in, l_in, out_mean)
-    real, intent(in)  :: m_in      !< @unit{kg}
-    real, intent(in)  :: l_in      !< @unit{m}
-    real, intent(out) :: out_mean  !< @unit{kg}
-    call avg_two(m_in, l_in, out_mean)
-  end subroutine caller_mismatch
-
-  ! Case D — caller passes consistent {m} to both slots.
   subroutine caller_clean(a_in, b_in, out_mean)
     real, intent(in)  :: a_in      !< @unit{m}
     real, intent(in)  :: b_in      !< @unit{m}
     real, intent(out) :: out_mean  !< @unit{m}
     call avg_two(a_in, b_in, out_mean)
   end subroutine caller_clean
-
-  ! ------------------------------------------------------------------
-  ! Function variants — same shape as Cases A-D but on a polymorphic
-  ! FUNCTION. The call lives in an assignment RHS (call_expression
-  ! node), and the function returns 'a too — exercises the return-
-  ! side rendering, distinct from the subroutine_call path above.
-  ! ------------------------------------------------------------------
-
-  ! Case E — polymorphic function (clean body, no fires).
-  function avg_two_f(x, y) result(out)
-    real, intent(in) :: x    !< @unit{'a}
-    real, intent(in) :: y    !< @unit{'a}
-    real             :: out  !< @unit{'a}
-    out = 0.5 * (x + y)
-  end function avg_two_f
-
-  ! Case F — clean caller of the function. No fires expected; mirrors
-  ! Case D for the function path.
-  subroutine caller_func_clean(a_in, b_in, r)
-    real, intent(in)  :: a_in   !< @unit{m}
-    real, intent(in)  :: b_in   !< @unit{m}
-    real, intent(out) :: r      !< @unit{m}
-    r = avg_two_f(a_in, b_in)
-  end subroutine caller_func_clean
-
-  ! Case G — H020 caller of the function. arg 1 (kg) and arg 2 (m)
-  ! force 'a to inconsistent units; mirrors Case C for the function
-  ! path.
-  subroutine caller_func_mismatch(m_in, l_in, r)
-    real, intent(in)  :: m_in   !< @unit{kg}
-    real, intent(in)  :: l_in   !< @unit{m}
-    real, intent(out) :: r      !< @unit{kg}
-    r = avg_two_f(m_in, l_in)
-  end subroutine caller_func_mismatch
-
 end module poly_qa
 ```
 
-### Diagnostics
+## Setup
 
-On a fresh open, confirm exactly the following diagnostics in
-`flymake-show-buffer-diagnostics` (eglot) or `lsp-treemacs-errors-list`
-(lsp-mode). Anything else is a regression.
+Open `qa.f90` and start the server: `M-x eglot`. Give the first
+workspace check a moment to finish, then walk the surfaces below.
 
-- [ ] **Case A — no diagnostics anywhere** on lines 5–12.
-- [ ] **Case B — H023 error** on the assignment expression line
-      `mean = half * (x + y) + bias_kg` (line 23). Message names
-      the offending term (`bias_kg : kg`) and explains the body
-      would force `'a = kg`.
-- [ ] **Case C — H020 error** on the call site `call avg_two(m_in,
-      l_in, out_mean)` (line 31). Message includes the **symmetric
-      `(collides with arg N (name))` trailer** — both arg 1 and arg
-      2 are named (no "first arg wins" asymmetry). The unit each
-      slot implied (`kg` and `m`) is rendered.
-- [ ] **Case D — no diagnostics** on lines 36–41.
-- [ ] **Case E — no diagnostics anywhere** in the `avg_two_f`
-      function body. Mirrors Case A's clean polymorphism, this time
-      on a `function`.
-- [ ] **Case F — no diagnostics** in `caller_func_clean`. The
-      `r = avg_two_f(a_in, b_in)` assignment is clean — function
-      return `'a` binds to `m`, RHS unit = LHS unit (`m`). Mirrors
-      Case D for the function path.
-- [ ] **Case G — H020 error** on the call_expression inside the
-      assignment `r = avg_two_f(m_in, l_in)`. Same shape as Case C
-      (symmetric `collides with` trailer, two-way conflict between
-      arg 1 = kg and arg 2 = m), just on a `call_expression` node
-      instead of `subroutine_call`. There should be NO additional
-      H001 / H004 / S001 on the assignment row — H020 alone owns
-      the failure.
-- [ ] **Diagnostic list** shows exactly **three** entries
-      (H023 + H020 + H020), nothing else.
+---
 
-### Hover
+## Surface 1 — Faces & fringes (flymake rendering)
 
-Hover with `eldoc-doc-buffer` (eglot) or `lsp-ui-doc-show`
-(lsp-mode), or `M-x dimfort-hover-at-point`.
+In Emacs flymake, the three severities have distinct visual styles.
+Confirm each one paints as expected on the qa fixtures:
 
-- [ ] **Hover on a tyvar in a signature** — cursor on the `'a` in
-      `@unit{'a}` on line 7 (Case A's `x`). Hover shows the
-      polymorphic marker — exact rendering TBD per the spec; should
-      indicate `'a` is a free type variable, not a concrete unit.
-- [ ] **Hover on a clean call site (Case D)** — cursor on
-      `call avg_two(...)` on line 41. Hover renders the
-      **σ-binding panel**: `'a = m` (the unifier's solution at this
-      call). Every slot row is 🟢.
-- [ ] **Hover on the failed call site (Case C)** — cursor on
-      `call avg_two(...)` on line 31. Hover surfaces the conflicting
-      contributions per slot (`x → kg`, `y → m`, `mean → kg`); no
-      single `σ` panel because unification failed.
-- [ ] **Hover on `mean` in Case B body** — cursor on `mean` on
-      line 23. The expression tree shows `'a` for `mean`, `kg` for
-      `bias_kg`, the conflict row marked 🔴.
-- [ ] **Hover on Case F's call assignment** — cursor on
-      `r = avg_two_f(a_in, b_in)`. Tree root is the assignment;
-      RHS row is the call_expression. Arg rows render bare `m` 🟢
-      (no `(expected 'a)` trailer, no demote — same as Case D's
-      subroutine_call path). RHS row's unit is `m` (the bound
-      return), matching LHS `r : m` cleanly.
-- [ ] **Hover on Case G's call assignment** — cursor on
-      `r = avg_two_f(m_in, l_in)`. Arg rows render the spec form:
-      `m_in : 'a = kg 🔴 (collides with arg 2)` and
-      `l_in : 'a = m 🔴 (collides with arg 1)`. The call_expression
-      RHS row shows 🔴 from the H020 propagation. Assignment row
-      inherits 🔴. No spurious `(expected ...)` trailers on any arg
-      row.
-- [ ] **Hover on a polymorphic var usage** — cursor on `x` inside
-      Case A's body (`mean = half * (x + y)`). Short hover shows the
-      same row shape as a concrete-var hover — `x : 'a` 🟢, no
-      trailer. Same on `y`. (Polymorphism shows in the unit column
-      via the `'a` tyvar text; otherwise reads as any normal
-      identifier hover.)
+- [ ] **Error** — on `qa.f90:25` (`bogus = c_sound * t`): the whole
+      assignment text in **bold red**, **red `!!`** in the left fringe.
+- [ ] **Warning** — on `qa.f90:23` (`real :: t_celsius`): the name
+      `t_celsius` in **bold orange**, **single orange `!`** in the
+      fringe.
+- [ ] **Info (P001)** — on `unparsed_qa.f90:6` (`vel = * / +`): a
+      **faint blue squiggle** under the line, **no fringe marker**
+      (distinct from real errors above the line).
+- [ ] **Info (U020)** — on `qa.f90:35` (the `@unit_assume` line):
+      surfaces only as the panel's 🔵 row, no special text styling
+      and no fringe marker (informational acknowledgement, not a
+      problem).
+- [ ] **P001 squiggle localised** — the blue underline on
+      `unparsed_qa.f90` covers exactly lines 6 and 7 (the bad line and
+      the swallowed `vel = 0.0`). Line 8 (`vel = vel * 2.0`) is
+      **not** blue.
 
-### Side panel
+## Surface 2 — Eldoc / hover display
 
-Cursor in each routine's body in turn (toggle the panel with
-`M-x dimfort-toggle-panel` if not already visible). The Scope
-section should list the routine's locals + formals; the polymorphic
-ones render with `'a` in the unit column.
+Hover defaults to **`short`**. Eldoc shows in the echo area;
+`M-x eldoc-doc-buffer` opens the full tree in a separate window.
 
-- [ ] **Case A — `avg_two`** — Scope lists `x`, `y`, `mean` each
-      with unit `'a`, and `half` with unit `1`. All rows 🟢.
-- [ ] **Case B — `biased_avg`** — Scope lists `x`, `y`, `mean` with
-      `'a`, `bias_kg` with `kg`, `half` with `1`. The dishonest body
-      assignment shows a 🔴 on `mean` (or a flag/marker that the
-      body conflicts with the signature — exact UX TBD).
-- [ ] **Case C — `caller_mismatch`** — Scope lists `m_in : kg`,
-      `l_in : m`, `out_mean : kg`. Side panel surfaces the call-site
-      σ failure somewhere (a dedicated row, marker, or callout —
-      exact rendering to verify).
-- [ ] **Case D — `caller_clean`** — Scope lists three rows in `m`.
-      No σ markers; the call site is uneventful.
-- [ ] **Case E — `avg_two_f`** — Scope lists `x`, `y`, `out` each
-      with unit `'a`. All rows 🟢 (clean function body).
-- [ ] **Case F — `caller_func_clean`** — Scope lists `a_in : m`,
-      `b_in : m`, `r : m`. All 🟢. The Expression section (with
-      cursor in the assignment) shows the call_expression RHS
-      resolving to `m` cleanly.
-- [ ] **Case G — `caller_func_mismatch`** — Scope lists `m_in : kg`,
-      `l_in : m`, `r : kg`. The Expression section surfaces the
-      H020 conflict on the call_expression child of the assignment
-      (same UX as Case C's subroutine_call).
-- [ ] **Polymorphic vars render full-weight in the unit column** —
-      across Cases A / B / E, the `'a` cells are rendered the same
-      visual weight as concrete units like `m` or `kg` on Cases C / D
-      / F / G. The `dimfort--dim` face only fires on bare `?` / bare
-      `-` / trailing `= ?`; a plain `'a` is a real annotation and
-      stays full-weight.
+- [ ] **Echo-area short hover** — point on `c_sound` (`qa.f90:2`): the
+      echo area shows the single row `c_sound : m·s⁻¹` (the unit is
+      rendered with the **middle dot** `·` and **superscript minus**
+      `⁻¹`, not ASCII `m/s`).
+- [ ] **Tree in eldoc-doc-buffer** — point on the product
+      `c_sound * t` (`qa.f90:24`), open `M-x eldoc-doc-buffer`. The
+      tree renders with **box-drawing connectors** (`├──`, `└──`),
+      **column-aligned** unit and marker columns, and **emoji glyphs**
+      (🟢 / 🟡 / 🔴 / 🔵) in the rightmost column. One canonical layout
+      to eyeball-check:
 
-### Interactive — inlay hints
+      ```
+      🟢 DimFort
+      c_sound * t  :  m       🟢
+      ├── c_sound  :  m·s⁻¹   🟢
+      └── t        :  s       🟢
+      ```
 
-- [ ] **Cursor in Case A's body** (any line 18–20). Run
-      `M-x dimfort-toggle-inlay-hints` — `[unit]`-style ghost text
-      appears after each variable use. Polymorphic vars (`x`, `y`,
-      `mean`) show `['a]`; the local `half` shows `[1]`. The `'a`
-      ghost text renders full-weight (no dim face — polymorphism is
-      a real annotation, not unknown).
-- [ ] **Cursor in Case F's body** (`r = avg_two_f(a_in, b_in)`). With
-      inlays still on, `a_in`, `b_in`, `r` show `[m]` (concrete);
-      same visual weight as the polymorphic case above.
-- [ ] **Disable when done** — re-run `M-x dimfort-toggle-inlay-hints`.
-      The QA's earlier sections assume the default (off).
+      Subsequent steps assume the same alignment pattern.
+- [ ] **Cycle hover mode** — `M-x dimfort-cycle-hover` cycles
+      `disabled → short → detailed`; each tick echoes
+      `DimFort: hover → <mode>` and **restarts the server**
+      (visible in `M-x eglot-events-buffer`). Hover content changes
+      shape on the next invocation; disabled silences hover.
+- [ ] **Pure-signature hover** — in `detailed`, point on the
+      function-def header `dynamic_pressure` (`qa.f90:5`). Eldoc
+      collapses to a single signature line, no per-arg row table.
+- [ ] **`(expected …)` trailer face** — in `detailed`, point on the
+      `=` of `qa.f90:25` (`bogus = c_sound * t`). The RHS row's
+      trailer `(expected kg)` renders distinctly (italic / dim) from
+      the row's primary text; the row's marker is 🟡 not 🟢.
+- [ ] **`@unit_assume` 🔵 overlay** — in `detailed`, point on
+      `qa.f90:35` (`rho_brandes`). The 🔵 glyph sits on the **RHS row
+      only**, not the assignment header. Trailer reads
+      `(assumed: empirical-fit Brandes2007)` and renders in the same
+      dim/italic style as `(expected …)`.
 
-### Interactive — H021 / H022 probes
+## Surface 3 — Side panel rendering
 
-- [ ] **H021 (tyvar in forbidden position)** — add a module-level
-      declaration at the top of `poly_qa`:
-      `real :: bad_global !< @unit{'a}`. Save. Expect an **H021
-      error** on that line: type variables aren't allowed in module-
-      level scope (only in routine arg lists / locals). Undo.
-- [ ] **H022 probe (cannot bind tyvar to affine unit)** — change
-      Case D's `a_in` annotation to `!< @unit{degC}`. Save. Expect
-      an **H022 error** on the `call avg_two(a_in, b_in, out_mean)`
-      site (Case D's call) stating that `'a` cannot bind to an
-      affine unit and offering a fix hint to convert to the base
-      unit (`K`) or pass as a delta. Type variables range over the
-      multiplicative algebra only; affine units (degC, degF) inhabit
-      a separate layer. Undo.
+Open with `M-x dimfort-toggle-panel` if not already visible (it opens
+automatically on attach by default). The panel buffer is `*dimfort*`,
+window placed on the right.
 
-### Known gaps in this annex
+### Layout
 
-- **Quick-fix coverage** — there's no Polymorphism-specific code
-  action today. The existing U002 / U023 / "Add @unit{}" actions
-  still apply normally on this file via `eglot-code-actions` /
-  `lsp-execute-code-action`; re-run those steps from the main
-  Configurable-delimiters section if needed.
-- **Inlay hints** — inlay hints (eglot 1.16+/lsp-mode `lsp-inlay-hint-enable`)
-  are off by default; polymorphic vars under inlays render as `'a`.
-  Toggle on and walk Case D to confirm if you care about that
-  surface today.
-- **Cross-file polymorphism** — this scene is single-file. Add a
-  separate `caller.f90` + `lib.f90` pair if cross-file lookup of a
-  polymorphic signature needs verifying.
+- [ ] **Sections divider** — a row of `─` characters spans the panel
+      width between Cursor / Scope, Scope / Imports, and Imports /
+      footer. Visible dividers always sit between two visible
+      neighbours.
+- [ ] **Column alignment** — in the Expression tree (panel for any
+      qa.f90 line), the unit column and marker column are aligned
+      across rows regardless of identifier length.
+- [ ] **Footer always present** — `M-x dimfort-toggle-cursor`,
+      `dimfort-toggle-scope`, `dimfort-toggle-imports` all three off:
+      the panel still shows the `File: …   Project: …` footer row.
+- [ ] **Dividers adapt** — toggle Cursor off; the divider that sat
+      between Cursor and Scope disappears (no stranded separator).
+      Same on toggling Scope.
 
-## Coverage visualisation (0.2.4)
+### Behavior
 
-Coverage requires the DimFort server with the `dimfort/lineStatus`
-method (server PR #53 merged). The companion mode is `"disabled"` by
-default; the tests below set it manually.
+- [ ] **Cursor-follow debounce** — move point rapidly between
+      `qa.f90:10` (function body) and `qa.f90:25` (subroutine body).
+      The panel dims briefly during refresh (~0.2 s debounce), then
+      re-renders with the appropriate scope.
+- [ ] **Footer tracks source buffer, not current buffer** — open
+      `qa.f90`, let the panel populate. `C-x b` to `*dimfort*` panel
+      buffer itself: footer's `File:` cell **continues** to show
+      qa.f90's stats (does not flicker to `–`). Same when current
+      buffer is `*DimFort Coverage*`.
+- [ ] **Prime stats on attach** — kill all buffers, revisit `qa.f90`
+      from disk. Within ~1.5 s of LSP attach, the footer's `File:`
+      cell populates without any manual edit.
 
-### Three-mode cycle
+### Workspace check display
 
-With `qa.f90` open:
+- [ ] **`Project: –` before first check** — footer's Project segment
+      reads `Project: –` dimmed.
+- [ ] **Braille spinner** — run `M-x dimfort-check-workspace`. The
+      Project segment becomes a spinner cycling through
+      `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` for the duration of the check.
+- [ ] **Settles on completion** — when
+      `dimfort/workspaceCheckCompleted` arrives, the segment settles
+      to `Project: <pct>% (🟡 N 🔴 M)`.
+- [ ] **Stale dim** — after a successful check, edit any Fortran
+      buffer. The Project segment dims. The File segment continues to
+      update live on each edit.
+- [ ] **Restart resets** — `M-x dimfort-restart` reverts the footer
+      to `File: –   Project: –` dimmed. Next workspace check
+      re-populates.
 
-- [ ] Run `M-x dimfort-cycle-coverage` once → the echo area shows
-      `DimFort: coverage gutter`. Confirm:
-      - **Green fringe dots** on annotated-declaration lines
-        (`real :: c_sound  !< @unit{m/s}` etc.) and on clean
-        expression lines (`d = c_sound * t`, `q = 0.5 * rho * v * v`,
-        the `combo`, `ln_p`, `rt_e2` calculations).
-      - **Yellow fringe dots** on `t_celsius`'s declaration (U005)
-        and on the `t_celsius = t - 273.15` line (H010 D1.5). With
-        U005 propagation (server PR #55), every other line
-        referencing `t_celsius` also paints yellow.
-      - **Red fringe dot** on the `bogus = c_sound * t` line (H001).
-      - Out-of-scope lines (`module`, `contains`, `end function`,
-        `end subroutine`, `end module`, blank lines, comment-only
-        lines) carry no fringe decoration.
-- [ ] Run `M-x dimfort-cycle-coverage` again → echo area shows
-      `DimFort: coverage background`. Confirm:
-      - The fringe dots are gone.
-      - Each in-scope line carries a low-alpha background tint in
-        the matching tier colour. `gutter` and `background` are
-        mutually exclusive — pick the visual weight you prefer.
-- [ ] Run `M-x dimfort-cycle-coverage` a third time → echo area
-      shows `DimFort: coverage disabled`. All coverage decorations
-      clear.
+## Surface 4 — Mode-line progress
 
-### U005 propagation regression (PR #55)
+Best verified on a real-world ~2400-file Fortran codebase (the small
+qa.f90 sample completes too fast to read every phase).
 
-- [ ] In `gutter` mode, delete `@unit{s}` from the `t` declaration
-      line. Save the buffer. Wait for the post-save refresh
-      (~500 ms after the server's check). Confirm:
-      - The `bogus = c_sound * t` line goes red → **yellow** (must
-        NOT turn green — `t` is now unannotated and propagates
-        yellow to every use site).
-      - The `d = c_sound * t` line also paints yellow.
-      - Restore the annotation; the lines should revert to red /
-        green respectively.
+- [ ] **All five phases observed** — run `M-x dimfort-check-workspace`
+      on the large workspace. The mode-line progress region cycles
+      through:
 
-### No LSP restart on mode flip
+      ```
+      [1/5] loading…
+      [2/5] indexing modules…
+      [3/5] checking…
+      [4/5] published N/N
+      [5/5] projecting coverage…
+      ```
 
-- [ ] Note the active server (`M-x eglot-events-buffer` shows the
-      server name and id; or `M-x lsp-describe-session` for
-      lsp-mode).
-- [ ] Cycle the coverage mode three times.
-- [ ] Re-check the server view — the same server should be active
-      (no restart). Cycling other settings such as hover via
-      `M-x dimfort-cycle-hover` DOES restart the server; this
-      contrast is the verification.
+- [ ] **`[5/5]` persistence** — the `[5/5] projecting coverage…`
+      string stays in the mode-line for the ~5 s post-publish
+      projection window. Clears only when
+      `dimfort/workspaceCheckCompleted` arrives and the panel
+      footer's Project column populates.
 
-### Face customisation
+## Surface 5 — Echo area + status command
 
-- [ ] After cycling to `gutter` mode, override one of the tier
-      colours:
-      `M-x customize-face RET dimfort-coverage-green` →
-      change `:foreground` to a new colour. Save. The green fringe
-      dots should repaint on the next refresh.
-- [ ] Same for background: cycle to `background` mode and
-      customise `dimfort-coverage-bg-green`'s `:background`. The
-      tint should refresh after the next edit.
+- [ ] **`M-x dimfort-status`** prints **exactly** these 12 lines:
+
+      ```
+      DimFort status
+        executable        : dimfort
+        inlay hints       : off
+        completion        : on
+        code actions      : on
+        go-to-definition  : on
+        hover             : short
+        cache             : read-write
+        scale checking    : auto
+        cache dir         : (default)
+        max workset size  : 40
+        external modules  : (none)
+      ```
+
+- [ ] **Cycle commands echo new mode** — each of the following
+      `M-x dimfort-cycle-*` commands reports the new value in the
+      echo area on every tick:
+      - `dimfort-cycle-hover` → `DimFort: hover → {disabled,short,detailed}`
+      - `dimfort-cycle-scale` → `DimFort: scale checking → {on,off,auto}`
+      - `dimfort-cycle-cache` → `DimFort: cache → {off,read-only,read-write}`
+      - `dimfort-cycle-sort-mode` → `DimFort: sort mode → {line,alphabetic,status}`
+      - `dimfort-cycle-unit-display` → `DimFort: unit display → {input,canonical,both}`
+      - `dimfort-cycle-coverage` → `DimFort: coverage {gutter,background,disabled}`
+
+- [ ] **Duplicate workspace trigger** — invoke
+      `M-x dimfort-check-workspace` twice in quick succession. The
+      second prints `DimFort: workspace check already in progress`
+      (no second worker spawns).
+- [ ] **Restart echo** — `M-x dimfort-restart` echoes a reset
+      confirmation; footer reverts to dim (Surface 3 cross-check).
+
+## Surface 6 — Inlay hints display
+
+- [ ] **Toggle visibility** — `M-x dimfort-toggle-inlay-hints` →
+      `[m·s⁻¹]`-style ghost text appears after variable use sites
+      (qa.f90 makes this easy to scan). Toggle again → ghost text
+      disappears.
+- [ ] **Polymorphic vars full-weight** — open `poly_qa.f90`, toggle
+      on, point in `avg_two`'s body. Ghost text on `x`, `y`, `mean`
+      reads `['a]` at the same visual weight as a concrete
+      `[m]`-style ghost (no dim face — polymorphism is a real
+      annotation, not unknown).
+- [ ] **Concrete vars** — in `caller_clean`, the ghost text on
+      `a_in`, `b_in` reads `[m]`. Same visual weight as the
+      polymorphic case.
+
+## Surface 7 — Code actions UI
+
+`M-x eglot-code-actions` with point on the relevant fixture line.
+
+- [ ] **Add `@unit{}`** — point on `t_celsius` (`qa.f90:23`). Menu
+      surfaces **"add `@unit{}`"**. Applying inserts `!< @unit{}` and
+      **leaves point between the braces** (the `$0` snippet placeholder
+      target works under Emacs's snippet apply path).
+- [ ] **Extract literal** — point on `273.15` (`qa.f90:26`). Menu
+      surfaces **"extract literal to PARAMETER"**. Applying prompts
+      in the minibuffer for a name, then inserts a typed
+      `real, parameter` declaration and replaces the literal with the
+      new name.
+- [ ] **U002 preferred fix** — point on `@unit{m2/s}`
+      (`delim_qa.f90:18` or qa.f90 with a temporary edit). Menu
+      surfaces **"DimFort: Replace with 'm^2/s'"** as the **preferred**
+      action (annotated as such in the menu). Applying edits
+      `m2/s` → `m^2/s` and clears the diagnostic.
+
+## Surface 8 — Navigation & completion
+
+- [ ] **`M-.` lands at decl** — `M-.` (`xref-find-definitions`) on a
+      `c_sound` use → point lands on `qa.f90:2` (the declaration
+      line).
+- [ ] **Cross-file `RET`** — open `imports_qa.f90`, panel visible,
+      point in `step`. In the Imports section, `RET` on `play`
+      navigates to its declaration (same file). Drop the `, only: …`
+      filter on `solver`'s `use phys_constants` to expose the
+      transitive `g0` row; `RET` on it **jumps cross-file** to
+      `phys_base`'s declaration line. Same-buffer or cross-buffer
+      depending on the row.
+- [ ] **Completion in `@unit{`** — type a new `!< @unit{` and invoke
+      completion (`C-M-i`); unit names are offered in the candidates
+      popup.
+- [ ] **Terminal `C-M-i` quirk** — if your terminal sends a literal
+      `9;6u` instead of `C-M-i` (CSI u keyboard protocol that terminal
+      Emacs doesn't decode), use **`ESC TAB`** instead (`ESC` is
+      Meta, `TAB` is `C-i`). GUI Emacs avoids the whole issue.
+
+## Surface 9 — Filter commands
+
+- [ ] **Scope filter** — `M-x dimfort-scope-filter RET Pa RET`
+      narrows the Scope section to vars whose name or unit matches
+      `Pa`. Panel header reads `Filter: "Pa"`. Scopes with no
+      surviving variables are hidden. Empty input clears.
+- [ ] **Imports filter** — `M-x dimfort-imports-filter RET gravity
+      RET` narrows the Imports section to `gravity_at(m)`. **Does
+      not** affect Scope (independent of the Scope filter).
+
+## Surface 10 — Coverage visualization
+
+- [ ] **Three-mode cycle** — `M-x dimfort-cycle-coverage` cycles
+      `gutter → background → disabled`. Echo area reports each tick.
+      Visual states:
+      - **gutter**: red / yellow / green fringe dots on in-scope
+        lines; out-of-scope lines (module/contains/blank/comment)
+        carry **no** fringe decoration.
+      - **background**: low-alpha tint on each in-scope line in the
+        matching tier colour; fringe dots **gone**. The two modes
+        are **mutually exclusive**.
+      - **disabled**: all coverage decorations clear.
+- [ ] **No LSP restart on mode flip** — note the active server in
+      `M-x eglot-events-buffer`. Cycle the coverage mode three times.
+      The same server stays active. Contrast with
+      `M-x dimfort-cycle-hover` which **does** restart the server —
+      the restart-or-not difference is the verification.
+- [ ] **Face customization repaints** —
+      `M-x customize-face RET dimfort-coverage-green` → change
+      `:foreground` to a new colour. Save. Green fringe dots repaint
+      on next refresh. Same path for `dimfort-coverage-bg-green` in
+      background mode.
+
+## Surface 11 — `M-x dimfort-coverage-report` buffer
+
+- [ ] **Cold-open populates** — fresh session, visit `qa.f90`,
+      immediately run `M-x dimfort-coverage-report`. A
+      `*DimFort Coverage*` buffer opens at the bottom (height ~14)
+      with a File / Project table. File column populates within
+      ~1–2 s of opening; no need to re-invoke.
+- [ ] **Project column dim until checked** — before
+      `M-x dimfort-check-workspace`, Project column reads `–` glyphs;
+      footer text reads `Project coverage not yet computed.` /
+      `Run M-x dimfort-check-workspace to compute.`. After a check
+      completes, the Project column populates asynchronously
+      (notification-driven, not return-value-driven).
+- [ ] **Stale marker on edits** — after a workspace check, edit any
+      buffer. Project column header switches to `Project (stale)`;
+      footer text invites re-running the workspace command.
+- [ ] **`q` closes** — `q` in the report buffer buries the window
+      via `quit-window`.
+
+## Surface 12 — Panel sort & unit-display modes (0.2.6)
+
+- [ ] **Sort cycle** — `M-x dimfort-cycle-sort-mode` cycles
+      `line → alphabetic → status`. Both Scope and Imports rows
+      re-sort in the **same repaint** (no LSP round-trip — panel
+      repaints from cached payload).
+- [ ] **Sort persistence** — pick `alphabetic` via
+      `M-x customize-variable RET dimfort-panel-sort-mode RET`, save
+      for future sessions. Restart Emacs, reopen file: both sections
+      come back in alphabetic order.
+- [ ] **Unit-display cycle** — `M-x dimfort-cycle-unit-display`
+      cycles `input → canonical → both`. Column layout changes per
+      mode in **both** Scope and Imports together:
+      - `input`: one column, annotation as written (`m/s`).
+      - `canonical` (default): one column, base-SI form (`m·s⁻¹`).
+      - `both`: two columns, `input ⟶ canonical`.
+- [ ] **Unit-display persistence** — same `customize-variable` path
+      for `dimfort-panel-unit-display-mode`.
+
+## Surface 13 — Config-file commands
+
+These need a **fresh project folder** with no `dimfort.toml` and no
+`units.toml`. `M-x cd` into an empty directory (verify
+`default-directory`) before each subsection.
+
+### `dimfort.toml`
+
+- [ ] **Empty cold-create** — `M-x dimfort-open-config` → pick
+      `Project configuration file (dimfort.toml)`. The
+      `completing-read` shows `Empty template` and
+      `Reference template (all sections commented out)`. Pick
+      `Empty file`. A new `dimfort.toml` appears at the project root,
+      opens, contains just the minimal header. Echo area:
+      `DimFort: created <path>/dimfort.toml`.
+- [ ] **Reference cold-create** — same as above, pick
+      `Reference template …`. The file's `[units]` / `[parser]` /
+      `[diagnostics]` / `[scale]` / `[project]` section headers are
+      all present but each line is prefixed with `# `.
+- [ ] **Warm-open** — run again, pick `Project configuration file`.
+      Opens existing file with **no sub-pick** and **no
+      modification**. No "created" echo.
+
+### `units.toml`
+
+- [ ] **Empty cold-create** — `M-x dimfort-open-config` → pick
+      `Project units file (units.toml)`. `completing-read` shows
+      `Empty template` and `Defaults as reference (all commented out)`.
+      Pick `Empty file`. A new `units.toml` appears alongside the
+      empty stub. A new `dimfort.toml` is auto-created with
+      `[units]\nfile = "units.toml"`. Echo:
+      `DimFort: created units.toml + wired into dimfort.toml`.
+- [ ] **Reference cold-create** — pick `Reference template …`. The
+      `[base]` / `[prefixes]` / `[derived]` sections are all present
+      with `# `-prefixed lines.
+- [ ] **Auto-wire appends to existing toml** — pre-create a
+      `dimfort.toml` with only `[diagnostics]\nH001 = "off"\n`. Run
+      command, pick units file. Existing `dimfort.toml` is **appended
+      with** `[units]\nfile = "units.toml"`; original sections
+      preserved.
+- [ ] **Existing `[units]` declines** — pre-create a `dimfort.toml`
+      containing `[units]\nother_key = "value"\n`. Run command, pick
+      units file. Echo: `DimFort: created units.toml. Your dimfort.toml
+      already has a [units] section — add 'file = "units.toml"' under
+      it to enable the new file.`. The `dimfort.toml` is **not**
+      modified.
+
+## Surface 14 — Server-restart behaviour on cycle commands
+
+- [ ] **Restarting cycles** —
+      `M-x dimfort-cycle-{hover,scale,cache}` each **restart the
+      server** on every tick (visible in `M-x eglot-events-buffer`).
+      Echo area still reports the new mode; mode persists across
+      restart.
+- [ ] **Non-restarting cycles** —
+      `M-x dimfort-cycle-{coverage,sort-mode,unit-display}` each
+      do **not** restart the server (client-side rendering modes
+      only).
+- [ ] **`dimfort-clear-cache`** — `M-x dimfort-clear-cache` deletes
+      `.dimfort-cache/` under the workspace root and restarts the
+      server. Echo: `DimFort: cache cleared (…)`. When the cache
+      directory does not exist, echo: `DimFort: cache directory does
+      not exist (already clean).`.
+
+## Surface 15 — Command-name parity
+
+- [ ] **`M-x dimfort-toggle-panel`** is the canonical name
+      (renamed from `dimfort-panel-toggle` in 0.2.6 for
+      cross-companion consistency). `M-x dimfort-panel-toggle` is
+      **not** offered as a command (the old name is gone, beta-period
+      rename per release-cycle convention).
+
+## Surface 16 — Polymorphic `'a` rendering
+
+(Open `poly_qa.f90`.)
+
+- [ ] **Scope rows** — point in `avg_two`'s body. Scope lists `x`,
+      `y`, `mean` each with unit cell `'a` and `half` with `1`. The
+      `'a` cells render at **full weight** (no dim face) — same
+      visual weight as concrete units like `m` in `caller_clean`'s
+      Scope (also point inside it to compare).
+- [ ] **Inlay full weight** — covered under Surface 6 (cross-check
+      that polymorphic ghost text matches concrete ghost-text weight).
+- [ ] **`dimfort--dim` face scope** — confirm the dim face fires
+      only on bare `?` / bare `-` / trailing `= ?`. A plain `'a` is
+      **never** dimmed.
+
+## Surface 17 — Delimiter-config face rendering
+
+(Open `delim_qa.f90` with the companion `dimfort.toml` saved next to
+it.)
+
+- [ ] **Bracket-pattern hover** — eldoc on `pa`, `a`/`b`/`c`, or
+      `kg` shows the bracket-captured unit (the toml configures `[…]`
+      as a unit delimiter pattern alongside `@unit{…}`).
+- [ ] **Plain `!` eligibility** — eldoc on `ws` (line 4) shows
+      `m/s`; the `! @unit{m/s}` form has no Doxygen marker but still
+      surfaces the unit.
+- [ ] **Quick-fix on U002** — `M-x eglot-code-actions` on the
+      `@unit{m2/s}` line surfaces **DimFort: Replace with 'm^2/s'**;
+      applying clears the diagnostic. (Same UX as Surface 7's U002
+      step — verified here against the delimiter scene.)
+- [ ] **Cache invalidation on pattern change** — comment out
+      `{ open = "@unit{", close = "}" }` in the toml, save, then
+      `M-x dimfort-restart`. Eldoc on `ws` should now show no unit
+      (canonical form no longer configured). Uncomment to restore.
+
+---
+
+Notes on out-of-scope checks: every step that asked for a specific
+diagnostic code / line / message / payload shape in the previous
+manual-QA shape has been removed in favour of the LSP integration
+suite, which now exercises:
+
+- diagnostics firing on the qa fixture
+  (`tests/lsp_integration/test_diagnostics.py`)
+- hover payload structure (`test_hover.py`)
+- inlay & panel payload (`test_inlay_and_panel.py`)
+- workspace check + `workspaceCheckCompleted` notification
+  (`test_workspace.py`)
+- coverage `lineStatus` tier classifications + U005 propagation
+  (`test_coverage.py`)
+- code-action data + completion candidates
+  (`test_actions_completion.py`)
+- lifecycle / `initialize` / cancellation (`test_lifecycle.py`)
+
+If a regression suggests the wire payload changed shape, **start
+there**; if everything in this walk passes but the suite fails,
+suspect a server-side change.
