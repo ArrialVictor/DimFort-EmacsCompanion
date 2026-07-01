@@ -76,6 +76,19 @@ defaults, packaging).
 
 ### Changed
 
+- **`MANUAL_QA.md` delim scene — toml key updated to 0.2.7 nested
+  format.** The Surface 17 delim scene documented the pre-0.2.7
+  flat `[parser] unit_comment_delimiters = [...]` key. The DimFort
+  server renamed this in 0.2.7 to the nested
+  `[parser.unit_comments].unit` table; the old key still parses but
+  the server warns to stderr and silently ignores it. Updated the
+  MANUAL_QA scene's `dimfort.toml` block to the new nested shape so
+  the delim walk actually exercises the bracket-pattern behaviour
+  it claims to test. Entry-shape (`{open, close}` per delimiter) is
+  unchanged. See DimFort's
+  `docs/troubleshooting/unit-comments-migration.md` for the full
+  migration reference.
+
 - **Cycle-command echo-arrow homogenized to `→`.** The three
   restart-cycle commands (`dimfort-cycle-hover` /
   `dimfort-cycle-scale` / `dimfort-cycle-cache`) — built from
