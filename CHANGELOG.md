@@ -76,6 +76,16 @@ defaults, packaging).
 
 ### Changed
 
+- **Cycle-command echo-arrow homogenized to `→`.** The three
+  restart-cycle commands (`dimfort-cycle-hover` /
+  `dimfort-cycle-scale` / `dimfort-cycle-cache`) — built from
+  the `dimfort--define-cycle` macro — previously echoed with
+  the ASCII `->` arrow (`DimFort: hover -> short`). The newer
+  0.2.6 cycles (`dimfort-cycle-sort-mode` /
+  `dimfort-cycle-unit-display`) settled on Unicode `→`
+  (`DimFort: sort mode → alphabetic`). The macro now uses `→`
+  so all five cycle commands echo with a consistent glyph.
+
 - **`MANUAL_QA.md` — `both` unit-display mode wording corrected.**
   The Surface 12 entry described the layout as `input ⟶ canonical`
   with an arrow separator; the actual companion rendering uses bare

@@ -963,7 +963,7 @@ otherwise."
               (pos (or (cl-position ,var vals :test #'equal) -1))
               (next (nth (mod (1+ pos) (length vals)) vals)))
          (setq ,var next)
-         (message "DimFort: %s -> %s" ,label next)
+         (message "DimFort: %s → %s" ,label next)
          (dimfort-restart)))))
 
 (dimfort--define-cycle dimfort-cycle-hover
