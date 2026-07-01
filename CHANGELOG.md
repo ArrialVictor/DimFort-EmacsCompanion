@@ -86,6 +86,14 @@ defaults, packaging).
   (`DimFort: sort mode → alphabetic`). The macro now uses `→`
   so all five cycle commands echo with a consistent glyph.
 
+- **`MANUAL_QA.md` — `both` unit-display mode wording corrected.**
+  The Surface 12 entry described the layout as `input ⟶ canonical`
+  with an arrow separator; the actual companion rendering uses bare
+  column separation (per the inline comment in `dimfort.el` on the
+  `both-p` branch: "no arrow / separator glyph — column spacing
+  already conveys the second cell"). Updated to describe the
+  side-by-side column layout without the arrow.
+
 - **`MANUAL_QA.md` reorganised around display surfaces.** The walk
   now covers only what an LSP client can't reach: face rendering,
   fringe glyphs, eldoc / panel ASCII layout, mode-line progress,
